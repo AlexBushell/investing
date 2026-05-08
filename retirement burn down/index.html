@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Capital Projection Calculator</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+    <div class="container">
+        <h1>Capital Projection Calculator</h1>
+
+        <div class="top-layout">
+            <div class="left-panel">
+        <div class="scenario-section">
+            <h2 style="font-size: 1.25rem; margin-top: 0; margin-bottom: 1rem;">Manage Scenarios</h2>
+            <div class="form-grid">
+                <div class="input-group">
+                    <label for="scenarioName">Save Current Settings</label>
+                    <div class="flex-row">
+                        <input type="text" id="scenarioName" placeholder="Scenario Name" class="flex-1">
+                        <button type="button" id="saveScenarioBtn" class="btn-inline">Save</button>
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label for="savedScenarios">Load / Delete Saved Scenario</label>
+                    <div class="flex-row">
+                        <select id="savedScenarios" class="flex-1">
+                            <option value="">-- Select --</option>
+                        </select>
+                        <button type="button" id="loadScenarioBtn" class="btn-inline btn-success">Load</button>
+                        <button type="button" id="deleteScenarioBtn" class="btn-inline btn-danger">Delete</button>
+                    </div>
+                </div>
+            </div>
+            <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--border-color);">
+        </div>
+
+        <form id="calculator-form">
+            <div class="form-grid">
+                <div class="input-group">
+                    <label for="startingAge">Starting Age</label>
+                    <input type="number" id="startingAge" step="1" required>
+                </div>
+                <div class="input-group">
+                    <label for="capital">Starting Capital (<span class="currency-symbol">$</span>)</label>
+                    <input type="number" id="capital" step="1000" required>
+                </div>
+                <div class="nested-group">
+                    <div class="nested-group-title">Positive Year Gains</div>
+                    <div class="flex-row">
+                        <div class="input-group flex-1">
+                            <label for="positiveYearMin">Min (%)</label>
+                            <input type="number" id="positiveYearMin" step="0.1" required>
+                        </div>
+                        <div class="input-group flex-1">
+                            <label for="positiveYearLikely">Likely (%)</label>
+                            <input type="number" id="positiveYearLikely" step="0.1" required>
+                        </div>
+                        <div class="input-group flex-1">
+                            <label for="positiveYearMax">Max (%)</label>
+                            <input type="number" id="positiveYearMax" step="0.1" required>
+                        </div>
+                    </div>
+                </div>
+                <div class="nested-group">
+                    <div class="nested-group-title">Market Regime (3-State Markov)</div>
+                    <div class="flex-row">
+                        <div class="input-group flex-1">
+                            <label for="probDownNormal" title="Probability of down year after a positive or flat year">Normal Down Prob (%)</label>
+                            <input type="number" id="probDownNormal" step="1" required>
+                        </div>
+                        <div class="input-group flex-1">
+                            <label for="probDownBounce" title="Probability of down year after a mild negative year (0 to -20%)">Bounce Down Prob (%)</label>
+                            <input type="number" id="probDownBounce" step="1" required>
+                        </div>
+                    </div>
+                    <div class="flex-row">
+                        <div class="input-group flex-1">
+                            <label for="probDownDeep" title="Probability of down year after a severe crash (worse than -20%)">Deep Crash Down Prob (%)</label>
+                            <input type="number" id="probDownDeep" step="1" required>
+                        </div>
+                        <div class="input-group flex-1">
+                            <label for="deepSnapbackMult" title="Multiplier applied to positive returns following a severe crash">Deep Snapback Multiplier</label>
+                            <input type="number" id="deepSnapbackMult" step="0.1" required>
+                        </div>
+                    </div>
+                </div>
+                <div class="nested-group">
+                    <div class="nested-group-title">Negative Year Drawdowns</div>
+                <div class="flex-row">
+                    <div class="input-group flex-1">
+                        <label for="negativeYearBest">Best (%)</label>
+                        <input type="number" id="negativeYearBest" step="0.1" required>
+                    </div>
+                    <div class="input-group flex-1">
+                        <label for="negativeYearLikely">Likely (%)</label>
+                        <input type="number" id="negativeYearLikely" step="0.1" required>
+                    </div>
+                    <div class="input-group flex-1">
+                        <label for="negativeYearWorst">Worst (%)</label>
+                        <input type="number" id="negativeYearWorst" step="0.1" required>
+                    </div>
+                </div>
+                </div>
+                <div class="input-group">
+                    <label for="taxRate">Capital Gains Tax Rate (%)</label>
+                    <input type="number" id="taxRate" step="0.1" required>
+                </div>
+                <div class="input-group">
+                    <label for="inflation">Inflation Rate (%)</label>
+                    <input type="number" id="inflation" step="0.1" required>
+                </div>
+                <div class="input-group">
+                    <label for="monthlyIncome">Net Monthly Income Required (<span class="currency-symbol">$</span>)</label>
+                    <input type="number" id="monthlyIncome" step="100" required>
+                </div>
+                <div class="nested-group">
+                    <div class="nested-group-title">Additional Income (e.g., Social Security)</div>
+                    <div class="flex-row">
+                        <div class="input-group flex-1">
+                            <label for="additionalIncome">Monthly Amount (<span class="currency-symbol">$</span>)</label>
+                            <input type="number" id="additionalIncome" step="100" required>
+                        </div>
+                        <div class="input-group flex-1">
+                            <label for="additionalIncomeStartAge">Starts at Age</label>
+                            <input type="number" id="additionalIncomeStartAge" step="1" required>
+                        </div>
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label for="incomeDecayRate">Income Decay Rate (%)</label>
+                    <input type="number" id="incomeDecayRate" step="0.1" required>
+                </div>
+                <div class="input-group">
+                    <label for="decayFlattenYears">Years until Decay Flattens</label>
+                    <input type="number" id="decayFlattenYears" step="1" required>
+                </div>
+                <div class="nested-group">
+                    <div class="nested-group-title">Dynamic Spending Guardrails</div>
+                    <div class="flex-row">
+                        <div class="input-group flex-1">
+                            <label for="guardrailThreshold" title="If real portfolio value drops this much below starting capital">Drawdown Threshold (%)</label>
+                            <input type="number" id="guardrailThreshold" step="1" required>
+                        </div>
+                        <div class="input-group flex-1">
+                            <label for="guardrailCut" title="Temporarily reduce spending by this much until recovery">Spending Cut (%)</label>
+                            <input type="number" id="guardrailCut" step="1" required>
+                        </div>
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label for="years">Years to Project</label>
+                    <input type="number" id="years" step="1" required>
+                </div>
+            </div>
+            <button type="submit">Calculate Projection</button>
+        </form>
+            </div>
+            <div class="right-panel">
+                <div class="kpi-dashboard" id="kpi-dashboard" style="display: none;">
+                    <div class="kpi-card">
+                        <div class="kpi-title">Worst Case Depletion</div>
+                        <div class="kpi-value" id="kpi-depletion">--</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-title">Median Final Balance (Today's <span class="currency-symbol">$</span>)</div>
+                        <div class="kpi-value" id="kpi-median-balance">--</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-title">Median Taxes Paid (Today's <span class="currency-symbol">$</span>)</div>
+                        <div class="kpi-value" id="kpi-median-taxes">--</div>
+                    </div>
+                </div>
+                <div class="percentile-controls">
+                    <div style="font-size: 0.875rem; font-weight: bold; text-align: center; margin-bottom: 0.5rem;">Capital Projection Percentiles:</div>
+                    <div class="chart-controls" id="percentile-toggles">
+                        <label class="toggle-label"><input type="checkbox" class="percentile-toggle" value="90"> <span style="color: #10b981;">■</span> <span class="legend-text" data-percentile="90">90th</span></label>
+                        <label class="toggle-label"><input type="checkbox" class="percentile-toggle" value="80"> <span style="color: #cbd5e1;">■</span> <span class="legend-text" data-percentile="80">80th</span></label>
+                        <label class="toggle-label"><input type="checkbox" class="percentile-toggle" value="70" checked> <span style="color: #cbd5e1;">■</span> <span class="legend-text" data-percentile="70">70th</span></label>
+                        <label class="toggle-label"><input type="checkbox" class="percentile-toggle" value="60" checked> <span style="color: #cbd5e1;">■</span> <span class="legend-text" data-percentile="60">60th</span></label>
+                        <label class="toggle-label"><input type="checkbox" class="percentile-toggle" value="50" checked> <span style="color: #2563eb;">■</span> <span class="legend-text" data-percentile="50">Median</span></label>
+                        <label class="toggle-label"><input type="checkbox" class="percentile-toggle" value="40" checked> <span style="color: #cbd5e1;">■</span> <span class="legend-text" data-percentile="40">40th</span></label>
+                        <label class="toggle-label"><input type="checkbox" class="percentile-toggle" value="30" checked> <span style="color: #cbd5e1;">■</span> <span class="legend-text" data-percentile="30">30th</span></label>
+                        <label class="toggle-label"><input type="checkbox" class="percentile-toggle" value="20"> <span style="color: #cbd5e1;">■</span> <span class="legend-text" data-percentile="20">20th</span></label>
+                        <label class="toggle-label"><input type="checkbox" class="percentile-toggle" value="10"> <span style="color: #ef4444;">■</span> <span class="legend-text" data-percentile="10">10th</span></label>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="burndownChart"></canvas>
+                </div>
+            <div class="chart-container">
+                <canvas id="incomeChart"></canvas>
+            </div>
+            </div>
+        </div>
+
+        <div class="results" id="results-container" style="display: none;">
+            <div class="flex-row" style="justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h3 style="margin: 0;">Projection Details</h3>
+                <div class="flex-row" style="align-items: center;">
+                    <label for="percentileSelect" style="margin-bottom: 0;">Show Percentile:</label>
+                    <select id="percentileSelect" style="width: auto; padding: 0.5rem;">
+                        <option value="90">90th (Best Case)</option>
+                        <option value="80">80th</option>
+                        <option value="70">70th</option>
+                        <option value="60">60th</option>
+                        <option value="50" selected>50th (Median Case)</option>
+                        <option value="40">40th</option>
+                        <option value="30">30th</option>
+                        <option value="20">20th</option>
+                        <option value="10">10th (Worst Case)</option>
+                    </select>
+                </div>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Age (Year)</th>
+                        <th>Starting Balance</th>
+                        <th>Investment Return</th>
+                        <th>Tax Paid</th>
+                        <th>Net Withdrawal (Infl. Adjusted)</th>
+                        <th>Ending Balance (Nominal)</th>
+                        <th>Ending Balance (Today's <span class="currency-symbol">$</span>)</th>
+                    </tr>
+                </thead>
+                <tbody id="results-body">
+                    <!-- Results will be injected here via JavaScript -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
