@@ -8,7 +8,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
 
-from ivf_agent_recursive import (
+from ivf.old.ivf_agent_recursive import (
     parse_materiality_score,
     parse_weakness_json,
     generate_weakness_id,
