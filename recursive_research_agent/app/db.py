@@ -44,6 +44,7 @@ class NodeDetail:
     node_id: str
     run_id: str
     parent_id: str | None
+    canonical_node_id: str | None
     status: NodeState
     topic: str
     description: str
@@ -74,6 +75,15 @@ class ModelCallDetail:
     error: str | None
     started_at: str
     completed_at: str | None
+
+
+@dataclass(frozen=True)
+class NodeFailureDetail:
+    failure_id: str
+    node_id: str
+    attempt: int
+    error: str
+    failed_at: str
 
 
 def utc_now() -> str:
@@ -337,7 +347,7 @@ def get_node_detail(conn: sqlite3.Connection, node_id: str) -> NodeDetail:
     row = conn.execute(
         """
         SELECT
-            node_id, run_id, parent_id, status, topic, description, material,
+            node_id, run_id, parent_id, canonical_node_id, status, topic, description, material,
             priority, resolution_state, evidence_basis, triggering_text_span,
             why_unresolved, investigation_brief, analysis, abstract,
             branch_synthesis, depth
@@ -473,6 +483,158 @@ def complete_run(conn: sqlite3.Connection, run_id: str) -> RunRecord:
     return get_run(conn, run_id)
 
 
+def record_node_failure(
+    conn: sqlite3.Connection,
+    *,
+    node_id: str,
+    error: str,
+) -> NodeFailureDetail:
+    """Persist a node failure and increment its attempt count."""
+
+    row = conn.execute(
+        """
+        SELECT COALESCE(MAX(attempt), 0) AS last_attempt
+        FROM node_failures
+        WHERE node_id = ?
+        """,
+        (node_id,),
+    ).fetchone()
+    attempt = int(row["last_attempt"]) + 1
+    failure = NodeFailureDetail(
+        failure_id=str(uuid4()),
+        node_id=node_id,
+        attempt=attempt,
+        error=error,
+        failed_at=utc_now(),
+    )
+    with transaction(conn):
+        conn.execute(
+            """
+            INSERT INTO node_failures (
+                failure_id, node_id, attempt, error, failed_at
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                failure.failure_id,
+                failure.node_id,
+                failure.attempt,
+                failure.error,
+                failure.failed_at,
+            ),
+        )
+    return failure
+
+
+def node_failures(
+    conn: sqlite3.Connection,
+    node_id: str,
+) -> list[NodeFailureDetail]:
+    """Return persisted failure records for a node in attempt order."""
+
+    return [
+        NodeFailureDetail(
+            failure_id=row["failure_id"],
+            node_id=row["node_id"],
+            attempt=int(row["attempt"]),
+            error=row["error"],
+            failed_at=row["failed_at"],
+        )
+        for row in conn.execute(
+            """
+            SELECT failure_id, node_id, attempt, error, failed_at
+            FROM node_failures
+            WHERE node_id = ?
+            ORDER BY attempt ASC
+            """,
+            (node_id,),
+        )
+    ]
+
+
+def recover_transitional_nodes(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str | None = None,
+) -> int:
+    """Reset interrupted transitional nodes to safe resumable states.
+
+    Policy:
+    - `investigating` -> `pending`
+    - `reflecting` -> `pending`
+    - `synthesizing` -> `awaiting_children`
+    """
+
+    with transaction(conn):
+        now = utc_now()
+        investigating_where = "status = ?"
+        reflecting_where = "status = ?"
+        synthesizing_where = "status = ?"
+        investigating_params: tuple[Any, ...] = (
+            NodeState.PENDING.value,
+            now,
+            NodeState.INVESTIGATING.value,
+        )
+        reflecting_params: tuple[Any, ...] = (
+            NodeState.PENDING.value,
+            now,
+            NodeState.REFLECTING.value,
+        )
+        synthesizing_params: tuple[Any, ...] = (
+            NodeState.AWAITING_CHILDREN.value,
+            now,
+            NodeState.SYNTHESIZING.value,
+        )
+        if run_id is not None:
+            investigating_where = "run_id = ? AND status = ?"
+            reflecting_where = "run_id = ? AND status = ?"
+            synthesizing_where = "run_id = ? AND status = ?"
+            investigating_params = (
+                NodeState.PENDING.value,
+                now,
+                run_id,
+                NodeState.INVESTIGATING.value,
+            )
+            reflecting_params = (
+                NodeState.PENDING.value,
+                now,
+                run_id,
+                NodeState.REFLECTING.value,
+            )
+            synthesizing_params = (
+                NodeState.AWAITING_CHILDREN.value,
+                now,
+                run_id,
+                NodeState.SYNTHESIZING.value,
+            )
+
+        investigating = conn.execute(
+            f"""
+            UPDATE nodes
+            SET status = ?, updated_at = ?
+            WHERE {investigating_where}
+            """,
+            investigating_params,
+        ).rowcount
+        reflecting = conn.execute(
+            f"""
+            UPDATE nodes
+            SET status = ?, updated_at = ?
+            WHERE {reflecting_where}
+            """,
+            reflecting_params,
+        ).rowcount
+        synthesizing = conn.execute(
+            f"""
+            UPDATE nodes
+            SET status = ?, updated_at = ?
+            WHERE {synthesizing_where}
+            """,
+            synthesizing_params,
+        ).rowcount
+    return int(investigating) + int(reflecting) + int(synthesizing)
+
+
 def next_pending_node(
     conn: sqlite3.Connection,
     *,
@@ -551,7 +713,7 @@ def child_nodes(conn: sqlite3.Connection, node_id: str) -> list[NodeDetail]:
         for row in conn.execute(
             """
             SELECT
-                node_id, run_id, parent_id, status, topic, description, material,
+                node_id, run_id, parent_id, canonical_node_id, status, topic, description, material,
                 priority, resolution_state, evidence_basis, triggering_text_span,
                 why_unresolved, investigation_brief, analysis, abstract,
                 branch_synthesis, depth
@@ -572,7 +734,7 @@ def root_nodes(conn: sqlite3.Connection, run_id: str) -> list[NodeDetail]:
         for row in conn.execute(
             """
             SELECT
-                node_id, run_id, parent_id, status, topic, description, material,
+                node_id, run_id, parent_id, canonical_node_id, status, topic, description, material,
                 priority, resolution_state, evidence_basis, triggering_text_span,
                 why_unresolved, investigation_brief, analysis, abstract,
                 branch_synthesis, depth
@@ -604,6 +766,97 @@ def has_open_nodes(conn: sqlite3.Connection, run_id: str) -> bool:
         ),
     ).fetchone()
     return row is not None
+
+
+def run_nodes(conn: sqlite3.Connection, run_id: str) -> list[NodeDetail]:
+    """Return all nodes for a run in creation order."""
+
+    return [
+        _node_detail_from_row(row)
+        for row in conn.execute(
+            """
+            SELECT
+                node_id, run_id, parent_id, canonical_node_id, status, topic,
+                description, material, priority, resolution_state,
+                evidence_basis, triggering_text_span, why_unresolved,
+                investigation_brief, analysis, abstract, branch_synthesis, depth
+            FROM nodes
+            WHERE run_id = ?
+            ORDER BY created_at ASC
+            """,
+            (run_id,),
+        )
+    ]
+
+
+def mark_node_reference(
+    conn: sqlite3.Connection,
+    *,
+    reference_node_id: str,
+    canonical_node_id: str,
+    origin_brief: str,
+) -> None:
+    """Persist reference metadata linking a duplicate node to its canonical."""
+
+    now = utc_now()
+    with transaction(conn):
+        conn.execute(
+            """
+            UPDATE nodes
+            SET canonical_node_id = ?, updated_at = ?
+            WHERE node_id = ?
+            """,
+            (canonical_node_id, now, reference_node_id),
+        )
+        conn.execute(
+            """
+            UPDATE nodes
+            SET reference_count = reference_count + 1, updated_at = ?
+            WHERE node_id = ?
+            """,
+            (now, canonical_node_id),
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO node_references (
+                canonical_node_id, reference_node_id, origin_brief, created_at
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (canonical_node_id, reference_node_id, origin_brief, now),
+        )
+
+
+def next_reference_ready_node(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+) -> NodeRecord | None:
+    """Return a reference node whose canonical node has reached a terminal state."""
+
+    row = conn.execute(
+        """
+        SELECT r.node_id, r.run_id, r.parent_id, r.status, r.topic, r.priority, r.depth
+        FROM nodes r
+        JOIN nodes c
+          ON c.node_id = r.canonical_node_id
+        WHERE r.run_id = ?
+          AND r.status = ?
+          AND c.status IN (?, ?, ?)
+        ORDER BY r.priority ASC, r.created_at ASC
+        LIMIT 1
+        """,
+        (
+            run_id,
+            NodeState.REFERENCE.value,
+            NodeState.COMPLETE.value,
+            NodeState.FAILED.value,
+            NodeState.REJECTED.value,
+        ),
+    ).fetchone()
+    if row is None:
+        return None
+    return _node_from_row(row)
 
 
 def node_count(conn: sqlite3.Connection, run_id: str) -> int:
@@ -728,6 +981,27 @@ def model_calls(
     ]
 
 
+def model_call(
+    conn: sqlite3.Connection,
+    *,
+    call_id: str,
+) -> ModelCallDetail | None:
+    """Return a single model call record by id."""
+
+    row = conn.execute(
+        """
+        SELECT
+            call_id, run_id, node_id, call_type, model_name, prompt_version,
+            input_json, output_json, output_text, error, started_at,
+            completed_at
+        FROM model_calls
+        WHERE call_id = ?
+        """,
+        (call_id,),
+    ).fetchone()
+    return _model_call_from_row(row) if row is not None else None
+
+
 def node_rejection(conn: sqlite3.Connection, node_id: str) -> sqlite3.Row | None:
     """Return rejection metadata for a node if present."""
 
@@ -807,6 +1081,7 @@ def _node_detail_from_row(row: sqlite3.Row) -> NodeDetail:
         node_id=row["node_id"],
         run_id=row["run_id"],
         parent_id=row["parent_id"],
+        canonical_node_id=row["canonical_node_id"],
         status=NodeState(row["status"]),
         topic=row["topic"],
         description=row["description"],

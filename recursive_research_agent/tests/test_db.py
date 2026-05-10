@@ -12,7 +12,10 @@ from app.db import (
     create_node,
     create_run,
     initialize_database,
+    node_failures,
     next_pending_node,
+    record_node_failure,
+    recover_transitional_nodes,
     node_events,
     model_calls,
 )
@@ -191,6 +194,105 @@ class DatabaseTests(unittest.TestCase):
         self.assertIsNone(calls[0].error)
         self.assertEqual("validation failed", calls[1].error)
         self.assertIsNotNone(calls[1].completed_at)
+
+    def test_record_node_failure_increments_attempts(self):
+        run = create_run(self.conn, "Example Co")
+        node = create_node(
+            self.conn,
+            run_id=run.run_id,
+            topic="Revenue quality",
+            investigation_brief="Investigate Example Co revenue quality.",
+        )
+
+        first = record_node_failure(self.conn, node_id=node.node_id, error="first")
+        second = record_node_failure(self.conn, node_id=node.node_id, error="second")
+        failures = node_failures(self.conn, node.node_id)
+
+        self.assertEqual(1, first.attempt)
+        self.assertEqual(2, second.attempt)
+        self.assertEqual(["first", "second"], [failure.error for failure in failures])
+
+    def test_recover_transitional_nodes_resets_interrupted_states(self):
+        run = create_run(self.conn, "Example Co")
+        investigating = create_node(
+            self.conn,
+            run_id=run.run_id,
+            topic="Investigating",
+            investigation_brief="Investigate current work.",
+        )
+        reflecting = create_node(
+            self.conn,
+            run_id=run.run_id,
+            topic="Reflecting",
+            investigation_brief="Reflect on analysis.",
+        )
+        synthesizing = create_node(
+            self.conn,
+            run_id=run.run_id,
+            topic="Synthesizing",
+            investigation_brief="Synthesize completed branch.",
+        )
+
+        apply_node_event(
+            self.conn,
+            node_id=investigating.node_id,
+            event=NodeEvent.START_INVESTIGATION,
+        )
+        apply_node_event(
+            self.conn,
+            node_id=reflecting.node_id,
+            event=NodeEvent.START_INVESTIGATION,
+        )
+        apply_node_event(
+            self.conn,
+            node_id=reflecting.node_id,
+            event=NodeEvent.DEEP_DIVE_SUCCEEDED,
+        )
+        apply_node_event(
+            self.conn,
+            node_id=synthesizing.node_id,
+            event=NodeEvent.START_INVESTIGATION,
+        )
+        apply_node_event(
+            self.conn,
+            node_id=synthesizing.node_id,
+            event=NodeEvent.DEEP_DIVE_SUCCEEDED,
+        )
+        apply_node_event(
+            self.conn,
+            node_id=synthesizing.node_id,
+            event=NodeEvent.REFLECT_FOUND_CHILDREN,
+        )
+        apply_node_event(
+            self.conn,
+            node_id=synthesizing.node_id,
+            event=NodeEvent.CHILDREN_COMPLETED,
+        )
+
+        recovered = recover_transitional_nodes(self.conn, run_id=run.run_id)
+
+        self.assertEqual(3, recovered)
+        statuses = {
+            row["node_id"]: row["status"]
+            for row in self.conn.execute(
+                """
+                SELECT node_id, status
+                FROM nodes
+                WHERE node_id IN (?, ?, ?)
+                """,
+                (
+                    investigating.node_id,
+                    reflecting.node_id,
+                    synthesizing.node_id,
+                ),
+            )
+        }
+        self.assertEqual(NodeState.PENDING.value, statuses[investigating.node_id])
+        self.assertEqual(NodeState.PENDING.value, statuses[reflecting.node_id])
+        self.assertEqual(
+            NodeState.AWAITING_CHILDREN.value,
+            statuses[synthesizing.node_id],
+        )
 
 
 if __name__ == "__main__":

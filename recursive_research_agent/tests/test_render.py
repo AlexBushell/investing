@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from app import db
+from app.fsm import NodeEvent
 from app.llm import FakeModelClient
 from app.orchestrator import run_to_completion, start_run
 from app.render import (
@@ -95,6 +96,28 @@ class RenderTests(unittest.TestCase):
 
         self.assertIn("_No nodes yet._", audit)
         self.assertIn("_No investigations completed._", dossier)
+
+    def test_failed_nodes_render_latest_failure_details(self):
+        run = start_run(self.conn, company="Example Co", model=FakeModelClient())
+        root = db.root_nodes(self.conn, run.run_id)[0]
+        db.record_node_failure(
+            self.conn,
+            node_id=root.node_id,
+            error="Brave Search returned HTTP 429: rate limit",
+        )
+        db.apply_node_event(
+            self.conn,
+            node_id=root.node_id,
+            event=NodeEvent.NODE_FAILED,
+        )
+
+        audit = render_audit_markdown(self.conn, run.run_id)
+        dossier = render_dossier_markdown(self.conn, run.run_id)
+
+        self.assertIn("Latest failure attempt: `1`", audit)
+        self.assertIn("Latest failure: Brave Search returned HTTP 429", audit)
+        self.assertIn("Latest failure attempt: `1`", dossier)
+        self.assertIn("Latest failure: Brave Search returned HTTP 429", dossier)
 
     def test_write_markdown_helpers_create_parent_directories(self):
         run = db.create_run(self.conn, "Example Co")

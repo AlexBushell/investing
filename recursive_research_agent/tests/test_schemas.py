@@ -9,12 +9,16 @@ from app.schemas import (
     Confidence,
     DecayClass,
     DeepDiveOutput,
+    DedupDecision,
+    DeduplicationDecisionOutput,
     EvidenceBasis,
     ExtractFindingsOutput,
     ExtractedFinding,
     PersistentUncertaintyClassificationOutput,
     ReflectOutput,
     ResolutionState,
+    SearchPlanOutput,
+    SiblingConsolidationOutput,
     ScopeOutput,
     SourceType,
     ThreadCandidate,
@@ -105,18 +109,20 @@ class SchemaTests(unittest.TestCase):
     def test_deep_dive_output_accepts_empty_optional_lists(self):
         output = DeepDiveOutput.model_validate(
             {
-                "analysis": (
-                    "Analysis with inline attribution. "
-                    "END_OF_DEEP_DIVE_ANALYSIS."
-                ),
+                "core_question": "Assess Example Co revenue durability.",
+                "source_assessment": "The supplied source is an annual report excerpt.",
+                "key_findings": ["Source 1 states revenue increased."],
+                "evidence_gaps": [],
+                "conclusion": "The supplied source supports growth but not durability.",
                 "abstract": "One paragraph abstract.",
             }
         )
 
         self.assertEqual([], output.contradictions)
         self.assertEqual([], output.discovered_threads)
+        self.assertIn("## Evidence Gaps", output.analysis)
 
-    def test_deep_dive_output_rejects_missing_completion_marker(self):
+    def test_deep_dive_output_rejects_legacy_analysis_blob(self):
         with self.assertRaises(ValidationError):
             DeepDiveOutput.model_validate(
                 {
@@ -125,30 +131,68 @@ class SchemaTests(unittest.TestCase):
                 }
             )
 
-    def test_deep_dive_output_normalizes_marker_without_period(self):
-        output = DeepDiveOutput.model_validate(
+    def test_deep_dive_output_rejects_completion_sentinel_in_fields(self):
+        with self.assertRaises(ValidationError):
+            DeepDiveOutput.model_validate(
+                {
+                    "core_question": "Assess Example Co revenue durability.",
+                    "source_assessment": "The supplied source is an annual report excerpt.",
+                    "key_findings": [
+                        "Source 1 states revenue increased. END_OF_DEEP_DIVE_ANALYSIS."
+                    ],
+                    "evidence_gaps": [],
+                    "conclusion": "The supplied source supports growth but not durability.",
+                    "abstract": "One paragraph abstract.",
+                }
+            )
+
+    def test_search_plan_accepts_up_to_six_queries(self):
+        output = SearchPlanOutput.model_validate(
             {
-                "analysis": "Analysis. END_OF_DEEP_DIVE_ANALYSIS",
-                "abstract": "One paragraph abstract.",
+                "queries": [
+                    {
+                        "query": f"Example Co source query {index}",
+                        "purpose": "Find evidence.",
+                    }
+                    for index in range(6)
+                ]
             }
         )
 
-        self.assertTrue(output.analysis.endswith("END_OF_DEEP_DIVE_ANALYSIS."))
+        self.assertEqual(6, len(output.queries))
 
-    def test_deep_dive_output_accepts_shorter_marker_alias(self):
-        output = DeepDiveOutput.model_validate(
-            {
-                "analysis": "Analysis. END_OF_ANALYSIS",
-                "abstract": "One paragraph abstract.",
-            }
-        )
-
-        self.assertTrue(output.analysis.endswith("END_OF_DEEP_DIVE_ANALYSIS."))
+    def test_search_plan_rejects_more_than_six_queries(self):
+        with self.assertRaises(ValidationError):
+            SearchPlanOutput.model_validate(
+                {
+                    "queries": [
+                        {
+                            "query": f"Example Co source query {index}",
+                            "purpose": "Find evidence.",
+                        }
+                        for index in range(7)
+                    ]
+                }
+            )
 
     def test_reflect_output_accepts_empty_children(self):
         output = ReflectOutput.model_validate({"child_threads": []})
 
         self.assertEqual([], output.child_threads)
+
+    def test_sibling_consolidation_output_accepts_reasoning(self):
+        output = SiblingConsolidationOutput.model_validate(
+            {
+                "child_threads": [],
+                "reasoning": "The sibling set was already canonical.",
+            }
+        )
+
+        self.assertEqual([], output.child_threads)
+        self.assertEqual(
+            "The sibling set was already canonical.",
+            output.reasoning,
+        )
 
     def test_extracted_finding_validates_enums(self):
         finding = ExtractedFinding.model_validate(
@@ -190,6 +234,31 @@ class SchemaTests(unittest.TestCase):
             ArbitrationDecision.SAME_QUESTION_REPHRASED,
             output.decision,
         )
+
+    def test_deduplication_decision_output(self):
+        output = DeduplicationDecisionOutput.model_validate(
+            {
+                "decision": "reference_existing",
+                "canonical_node_id": "node-123",
+                "reasoning": "The candidate asks the same question as node-123.",
+            }
+        )
+
+        self.assertEqual(DedupDecision.REFERENCE_EXISTING, output.decision)
+        self.assertTrue(output.should_reference)
+
+    def test_deduplication_decision_output_ignores_helper_fields(self):
+        output = DeduplicationDecisionOutput.model_validate(
+            {
+                "decision": "distinct",
+                "canonical_node_id": None,
+                "reasoning": "No existing thread covers this candidate.",
+                "distinct_with_null": None,
+            }
+        )
+
+        self.assertEqual(DedupDecision.DISTINCT, output.decision)
+        self.assertFalse(output.should_reference)
 
     def test_persistent_uncertainty_classification_maps_closure_class(self):
         output = PersistentUncertaintyClassificationOutput.model_validate(

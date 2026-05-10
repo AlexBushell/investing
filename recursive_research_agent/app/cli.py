@@ -3,15 +3,31 @@
 from __future__ import annotations
 
 import argparse
+from datetime import UTC, datetime
+import json
+import os
 from pathlib import Path
+import sqlite3
 
 from app import db
 from app.llm import DeepDiveContext, SourceMaterialContext
-from app.llm import FakeModelClient, OllamaGenerateClient, OllamaModelClient
+from app.llm import (
+    FakeModelClient,
+    OllamaGenerateClient,
+    OllamaModelClient,
+    OpenRouterModelClient,
+)
 from app.fsm import NodeEvent
 from app.orchestrator import WorkerConfig, run_to_completion, start_run
 from app.render import write_audit_markdown, write_dossier_markdown
-from app.search import DirectorySearchProvider, source_from_file
+from app.search import (
+    BraveSearchProvider,
+    CompositeSearchProvider,
+    DirectorySearchProvider,
+    SearchProvider,
+    TavilySearchProvider,
+    source_from_file,
+)
 
 
 DEFAULT_DB_PATH = Path("data") / "research.sqlite"
@@ -40,23 +56,44 @@ def build_parser() -> argparse.ArgumentParser:
     init_db = subparsers.add_parser("init-db", help="Initialize the database.")
     init_db.set_defaults(func=cmd_init_db)
 
-    fake_run = subparsers.add_parser(
-        "fake-run",
-        help="Run the deterministic fake-model vertical slice.",
+    run = subparsers.add_parser(
+        "run",
+        aliases=["fake-run"],
+        help="Run the recursive worker against local source data with the fake model.",
     )
-    fake_run.add_argument("company", help="Company name.")
-    fake_run.add_argument(
+    run.add_argument("company", help="Company name.")
+    run.add_argument(
         "--outputs-dir",
         default=str(DEFAULT_OUTPUTS_DIR),
         help=f"Run artifact output directory. Default: {DEFAULT_OUTPUTS_DIR}",
     )
-    fake_run.add_argument("--max-depth", type=int, default=8)
-    fake_run.add_argument("--max-total-nodes", type=int, default=500)
-    fake_run.add_argument(
+    run.add_argument("--max-depth", type=int, default=8)
+    run.add_argument("--max-total-nodes", type=int, default=500)
+    run.add_argument("--max-seconds", type=float)
+    run.add_argument(
         "--source-dir",
         help="Optional local directory of .md/.txt source files for deep-dives.",
     )
-    fake_run.set_defaults(func=cmd_fake_run)
+    run.set_defaults(func=cmd_run)
+
+    resume = subparsers.add_parser(
+        "resume",
+        help="Resume a fake-model run from persisted state.",
+    )
+    resume.add_argument("run_id", help="Run id to resume.")
+    resume.add_argument(
+        "--outputs-dir",
+        default=str(DEFAULT_OUTPUTS_DIR),
+        help=f"Run artifact output directory. Default: {DEFAULT_OUTPUTS_DIR}",
+    )
+    resume.add_argument("--max-depth", type=int, default=8)
+    resume.add_argument("--max-total-nodes", type=int, default=500)
+    resume.add_argument("--max-seconds", type=float)
+    resume.add_argument(
+        "--source-dir",
+        help="Optional local directory of .md/.txt source files for deep-dives.",
+    )
+    resume.set_defaults(func=cmd_resume)
 
     render = subparsers.add_parser("render", help="Render dossier markdown.")
     render.add_argument("run_id", help="Run id to render.")
@@ -73,6 +110,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output markdown path. Defaults to outputs/runs/<run_id>/audit.md.",
     )
     audit.set_defaults(func=cmd_audit)
+
+    model_calls = subparsers.add_parser(
+        "model-calls",
+        help="Summarize model calls for a run, including Ollama timing metadata.",
+    )
+    model_calls.add_argument("run_id", help="Run id to inspect.")
+    model_calls.set_defaults(func=cmd_model_calls)
+
+    model_call = subparsers.add_parser(
+        "model-call",
+        help="Show one persisted model call input/output for prompt debugging.",
+    )
+    model_call.add_argument("call_id", help="Model call id to inspect.")
+    model_call.add_argument(
+        "--raw",
+        action="store_true",
+        help="Print a single JSON object instead of the readable report.",
+    )
+    model_call.set_defaults(func=cmd_model_call)
 
     ollama_smoke = subparsers.add_parser(
         "ollama-smoke",
@@ -104,6 +160,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--think",
         action="store_true",
         help="Enable Ollama/Gemma thinking mode for the smoke call.",
+    )
+    ollama_smoke.add_argument(
+        "--keep-alive",
+        default="5m",
+        help="How long Ollama should keep the model loaded. Default: 5m",
     )
     ollama_smoke.add_argument(
         "--timeout-seconds",
@@ -191,14 +252,44 @@ def build_parser() -> argparse.ArgumentParser:
 
     ollama_run = subparsers.add_parser(
         "ollama-run",
-        help="Run a guarded real Ollama recursive pass using local source files.",
+        help="Run a guarded real Ollama recursive pass using configured sources.",
     )
     _add_ollama_args(ollama_run)
     ollama_run.add_argument("company", help="Company name.")
     ollama_run.add_argument(
         "--source-dir",
-        required=True,
         help="Local directory of .md/.txt source files for deep-dives.",
+    )
+    ollama_run.add_argument(
+        "--web-search",
+        choices=["brave", "tavily"],
+        help="Optional web search provider for deep-dives.",
+    )
+    ollama_run.add_argument(
+        "--brave-api-key",
+        help="Brave Search API key. Defaults to BRAVE_SEARCH_API_KEY.",
+    )
+    ollama_run.add_argument(
+        "--tavily-api-key",
+        help="Tavily Search API key. Defaults to TAVILY_API_KEY.",
+    )
+    ollama_run.add_argument(
+        "--freshness-days",
+        type=int,
+        default=730,
+        help="Requested freshness window for web sources. Default: 730.",
+    )
+    ollama_run.add_argument(
+        "--search-results",
+        type=int,
+        default=5,
+        help="Maximum source results to provide per node. Default: 5.",
+    )
+    ollama_run.add_argument(
+        "--search-queries",
+        type=int,
+        default=4,
+        help="Maximum planned search queries to run per node. Default: 4.",
     )
     ollama_run.add_argument(
         "--outputs-dir",
@@ -208,6 +299,18 @@ def build_parser() -> argparse.ArgumentParser:
     ollama_run.add_argument("--max-depth", type=int, default=1)
     ollama_run.add_argument("--max-total-nodes", type=int, default=3)
     ollama_run.set_defaults(func=cmd_ollama_run)
+
+    openrouter_run = subparsers.add_parser(
+        "openrouter-run",
+        help=(
+            "Run a guarded recursive pass using an OpenRouter model and "
+            "configured local/web sources."
+        ),
+    )
+    _add_openrouter_args(openrouter_run)
+    openrouter_run.add_argument("company", help="Company name.")
+    _add_run_source_args(openrouter_run)
+    openrouter_run.set_defaults(func=cmd_openrouter_run)
 
     return parser
 
@@ -222,12 +325,23 @@ def cmd_init_db(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_fake_run(args: argparse.Namespace) -> int:
+def cmd_run(args: argparse.Namespace) -> int:
     conn = db.connect(args.db)
     try:
         db.initialize_database(conn)
         model = FakeModelClient()
-        run = start_run(conn, company=args.company, model=model)
+        outputs_dir = Path(args.outputs_dir)
+        run = start_run(
+            conn,
+            company=args.company,
+            model=model,
+            config=WorkerConfig(
+                max_depth=args.max_depth,
+                max_total_nodes=args.max_total_nodes,
+                max_wall_clock_seconds=args.max_seconds,
+            ),
+            progress_callback=_audit_progress_callback(outputs_dir),
+        )
         completed = run_to_completion(
             conn,
             run_id=run.run_id,
@@ -240,7 +354,9 @@ def cmd_fake_run(args: argparse.Namespace) -> int:
             config=WorkerConfig(
                 max_depth=args.max_depth,
                 max_total_nodes=args.max_total_nodes,
+                max_wall_clock_seconds=args.max_seconds,
             ),
+            progress_callback=_audit_progress_callback(outputs_dir),
         )
 
         run_dir = Path(args.outputs_dir) / completed.run_id
@@ -257,10 +373,57 @@ def cmd_fake_run(args: argparse.Namespace) -> int:
     finally:
         conn.close()
 
-    print(f"Run complete: {completed.run_id}")
+    _print_run_result(completed, audit_path, dossier_path)
+    return 0
+
+
+def cmd_resume(args: argparse.Namespace) -> int:
+    conn = db.connect(args.db)
+    try:
+        db.initialize_database(conn)
+        model = FakeModelClient()
+        completed = run_to_completion(
+            conn,
+            run_id=args.run_id,
+            model=model,
+            search_provider=(
+                DirectorySearchProvider(args.source_dir)
+                if args.source_dir
+                else None
+            ),
+            config=WorkerConfig(
+                max_depth=args.max_depth,
+                max_total_nodes=args.max_total_nodes,
+                max_wall_clock_seconds=args.max_seconds,
+            ),
+            progress_callback=_audit_progress_callback(Path(args.outputs_dir)),
+        )
+        run_dir = Path(args.outputs_dir) / completed.run_id
+        audit_path = write_audit_markdown(
+            conn,
+            run_id=completed.run_id,
+            output_path=run_dir / "audit.md",
+        )
+        dossier_path = write_dossier_markdown(
+            conn,
+            run_id=completed.run_id,
+            output_path=run_dir / "dossier.md",
+        )
+    finally:
+        conn.close()
+
+    _print_run_result(completed, audit_path, dossier_path)
+    return 0
+
+
+def _print_run_result(completed, audit_path: Path, dossier_path: Path) -> None:
+    if completed.status == "complete":
+        print(f"Run complete: {completed.run_id}")
+    else:
+        print(f"Run paused: {completed.run_id}")
+        print(f"Status: {completed.status}")
     print(f"Audit: {audit_path}")
     print(f"Dossier: {dossier_path}")
-    return 0
 
 
 def cmd_render(args: argparse.Namespace) -> int:
@@ -304,6 +467,7 @@ def cmd_ollama_smoke(args: argparse.Namespace) -> int:
         temperature=args.temperature,
         num_predict=args.num_predict,
         enable_thinking=args.think,
+        keep_alive=args.keep_alive,
         timeout_seconds=args.timeout_seconds,
     )
     output = client.smoke_structured_output(company=args.company)
@@ -332,6 +496,7 @@ def cmd_ollama_scope_run(args: argparse.Namespace) -> int:
                 model_name=args.model,
                 prompt_version="scope-v1",
             ),
+            progress_callback=_audit_progress_callback(Path(args.outputs_dir)),
         )
         run_dir = Path(args.outputs_dir) / run.run_id
         audit_path = write_audit_markdown(
@@ -523,32 +688,38 @@ def cmd_ollama_reflect_smoke(args: argparse.Namespace) -> int:
 
 
 def cmd_ollama_run(args: argparse.Namespace) -> int:
+    search_provider = _search_provider_from_args(args)
+    _log(
+        "Starting ollama-run "
+        f"company={args.company!r} model={args.model} keep_alive={args.keep_alive}"
+    )
     conn = db.connect(args.db)
     try:
         db.initialize_database(conn)
         model = _ollama_model_from_args(args)
+        config = WorkerConfig(
+            max_depth=args.max_depth,
+            max_total_nodes=args.max_total_nodes,
+            model_name=args.model,
+            prompt_version="ollama-run-v1",
+            search_results_per_node=args.search_results,
+            search_queries_per_node=args.search_queries,
+            log_callback=_log,
+        )
         run = start_run(
             conn,
             company=args.company,
             model=model,
-            config=WorkerConfig(
-                max_depth=args.max_depth,
-                max_total_nodes=args.max_total_nodes,
-                model_name=args.model,
-                prompt_version="ollama-run-v1",
-            ),
+            config=config,
+            progress_callback=_audit_progress_callback(Path(args.outputs_dir)),
         )
         completed = run_to_completion(
             conn,
             run_id=run.run_id,
             model=model,
-            search_provider=DirectorySearchProvider(args.source_dir),
-            config=WorkerConfig(
-                max_depth=args.max_depth,
-                max_total_nodes=args.max_total_nodes,
-                model_name=args.model,
-                prompt_version="ollama-run-v1",
-            ),
+            search_provider=search_provider,
+            config=config,
+            progress_callback=_audit_progress_callback(Path(args.outputs_dir)),
         )
 
         run_dir = Path(args.outputs_dir) / completed.run_id
@@ -565,11 +736,194 @@ def cmd_ollama_run(args: argparse.Namespace) -> int:
     finally:
         conn.close()
 
+    _log(f"Finished ollama-run run_id={completed.run_id} status={completed.status}")
     print(f"Ollama run complete: {completed.run_id}")
     print(f"Status: {completed.status}")
     print(f"Audit: {audit_path}")
     print(f"Dossier: {dossier_path}")
     return 0
+
+
+def cmd_openrouter_run(args: argparse.Namespace) -> int:
+    search_provider = _search_provider_from_args(args, command_name="openrouter-run")
+    if not args.openrouter_api_key:
+        raise SystemExit(
+            "openrouter-run requires --openrouter-api-key or OPENROUTER_API_KEY."
+        )
+    _log(
+        "Starting openrouter-run "
+        f"company={args.company!r} model={args.model}"
+    )
+    conn = db.connect(args.db)
+    try:
+        db.initialize_database(conn)
+        model = _openrouter_model_from_args(args)
+        config = WorkerConfig(
+            max_depth=args.max_depth,
+            max_total_nodes=args.max_total_nodes,
+            model_name=args.model,
+            prompt_version="openrouter-run-v1",
+            search_results_per_node=args.search_results,
+            search_queries_per_node=args.search_queries,
+            log_callback=_log,
+        )
+        run = start_run(
+            conn,
+            company=args.company,
+            model=model,
+            config=config,
+            progress_callback=_audit_progress_callback(Path(args.outputs_dir)),
+        )
+        completed = run_to_completion(
+            conn,
+            run_id=run.run_id,
+            model=model,
+            search_provider=search_provider,
+            config=config,
+            progress_callback=_audit_progress_callback(Path(args.outputs_dir)),
+        )
+
+        run_dir = Path(args.outputs_dir) / completed.run_id
+        audit_path = write_audit_markdown(
+            conn,
+            run_id=completed.run_id,
+            output_path=run_dir / "audit.md",
+        )
+        dossier_path = write_dossier_markdown(
+            conn,
+            run_id=completed.run_id,
+            output_path=run_dir / "dossier.md",
+        )
+    finally:
+        conn.close()
+
+    _log(
+        f"Finished openrouter-run run_id={completed.run_id} "
+        f"status={completed.status}"
+    )
+    print(f"OpenRouter run complete: {completed.run_id}")
+    print(f"Status: {completed.status}")
+    print(f"Audit: {audit_path}")
+    print(f"Dossier: {dossier_path}")
+    return 0
+
+
+def cmd_model_calls(args: argparse.Namespace) -> int:
+    conn = db.connect(args.db)
+    try:
+        calls = db.model_calls(conn, run_id=args.run_id)
+    finally:
+        conn.close()
+
+    if not calls:
+        print(f"No model calls found for run: {args.run_id}")
+        return 0
+
+    print("Call ID | Call Type | Error | Load | Total | Eval Count | Started | Completed")
+    print("--- | --- | --- | --- | --- | --- | --- | ---")
+    for call in calls:
+        metadata = _model_call_metadata(call.output_json)
+        print(
+            " | ".join(
+                [
+                    call.call_id,
+                    call.call_type,
+                    "yes" if call.error else "no",
+                    _duration_ns(metadata.get("load_duration")),
+                    _duration_ns(metadata.get("total_duration")),
+                    str(metadata.get("eval_count") or ""),
+                    call.started_at,
+                    call.completed_at or "",
+                ]
+            )
+        )
+    return 0
+
+
+def cmd_model_call(args: argparse.Namespace) -> int:
+    conn = db.connect(args.db)
+    try:
+        call = db.model_call(conn, call_id=args.call_id)
+    finally:
+        conn.close()
+
+    if call is None:
+        raise SystemExit(f"No model call found: {args.call_id}")
+
+    payload = _model_call_to_dict(call)
+    if args.raw:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    print(f"Call ID: {call.call_id}")
+    print(f"Run ID: {call.run_id}")
+    print(f"Node ID: {call.node_id or ''}")
+    print(f"Call Type: {call.call_type}")
+    print(f"Model: {call.model_name}")
+    print(f"Prompt Version: {call.prompt_version}")
+    print(f"Started: {call.started_at}")
+    print(f"Completed: {call.completed_at or ''}")
+    print(f"Error: {'yes' if call.error else 'no'}")
+    print()
+    print("Input JSON:")
+    print(_pretty_json_value(payload["input"]))
+    if call.output_json:
+        print()
+        print("Output JSON:")
+        print(_pretty_json_value(payload["output_json"]))
+    if call.output_text:
+        print()
+        print("Output Text:")
+        print(call.output_text)
+    if call.error:
+        print()
+        print("Error Detail:")
+        print(call.error)
+    return 0
+
+
+def _search_provider_from_args(
+    args: argparse.Namespace,
+    *,
+    command_name: str = "ollama-run",
+) -> SearchProvider:
+    if args.search_results < 1:
+        raise SystemExit("--search-results must be at least 1.")
+    if args.search_queries < 1:
+        raise SystemExit("--search-queries must be at least 1.")
+    if args.freshness_days is not None and args.freshness_days < 0:
+        raise SystemExit("--freshness-days must not be negative.")
+
+    providers: list[SearchProvider] = []
+    if args.source_dir:
+        providers.append(DirectorySearchProvider(args.source_dir))
+    if args.web_search == "brave":
+        brave = BraveSearchProvider(
+            api_key=args.brave_api_key,
+            freshness_days=args.freshness_days,
+        )
+        if not brave.api_key:
+            raise SystemExit(
+                "--web-search brave requires --brave-api-key or BRAVE_SEARCH_API_KEY."
+            )
+        providers.append(brave)
+    if args.web_search == "tavily":
+        tavily = TavilySearchProvider(
+            api_key=args.tavily_api_key,
+            freshness_days=args.freshness_days,
+        )
+        if not tavily.api_key:
+            raise SystemExit(
+                "--web-search tavily requires --tavily-api-key or TAVILY_API_KEY."
+            )
+        providers.append(tavily)
+    if not providers:
+        raise SystemExit(
+            f"{command_name} requires --source-dir and/or --web-search brave|tavily."
+        )
+    if len(providers) == 1:
+        return providers[0]
+    return CompositeSearchProvider(providers)
 
 
 def _add_ollama_args(parser: argparse.ArgumentParser) -> None:
@@ -601,11 +955,142 @@ def _add_ollama_args(parser: argparse.ArgumentParser) -> None:
         help="Enable Ollama/Gemma thinking mode.",
     )
     parser.add_argument(
+        "--keep-alive",
+        default="5m",
+        help="How long Ollama should keep the model loaded. Default: 5m",
+    )
+    parser.add_argument(
         "--timeout-seconds",
         type=float,
         default=120.0,
         help="HTTP timeout in seconds. Default: 120",
     )
+
+
+def _add_openrouter_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--model",
+        required=True,
+        help=(
+            "OpenRouter model id, for example anthropic/claude-3.7-sonnet "
+            "or openai/gpt-4.1."
+        ),
+    )
+    parser.add_argument(
+        "--base-url",
+        default="https://openrouter.ai/api/v1",
+        help="OpenRouter API base URL. Default: https://openrouter.ai/api/v1",
+    )
+    parser.add_argument(
+        "--openrouter-api-key",
+        default=os.environ.get("OPENROUTER_API_KEY"),
+        help="OpenRouter API key. Defaults to OPENROUTER_API_KEY.",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=1.0,
+        help="Model temperature. Default: 1.0",
+    )
+    parser.add_argument(
+        "--num-predict",
+        type=int,
+        default=4096,
+        help="Maximum generated tokens. Default: 4096.",
+    )
+    parser.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=120.0,
+        help="HTTP timeout in seconds. Default: 120",
+    )
+    parser.add_argument(
+        "--openrouter-title",
+        default="recursive-research-agent",
+        help="Optional X-Title header for OpenRouter rankings.",
+    )
+    parser.add_argument(
+        "--openrouter-referer",
+        help="Optional HTTP-Referer header for OpenRouter rankings.",
+    )
+    parser.add_argument(
+        "--openrouter-provider",
+        action="append",
+        default=[],
+        dest="openrouter_providers",
+        help=(
+            "OpenRouter provider slug to prefer, for example 'anthropic'. "
+            "May be passed multiple times to set provider order."
+        ),
+    )
+    parser.add_argument(
+        "--openrouter-no-fallbacks",
+        action="store_true",
+        help="Disable fallback to other OpenRouter providers.",
+    )
+    parser.add_argument(
+        "--openrouter-require-parameters",
+        action="store_true",
+        help=(
+            "Only route to providers that support all request parameters, "
+            "including structured JSON response_format."
+        ),
+    )
+    parser.add_argument(
+        "--openrouter-response-format",
+        choices=["json_schema", "json_object", "none"],
+        default="json_schema",
+        help=(
+            "Structured response mode. json_schema is strict but needs provider "
+            "support; json_object is looser and works with more providers; none "
+            "uses prompt-only JSON instructions. Default: json_schema."
+        ),
+    )
+
+
+def _add_run_source_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--source-dir",
+        help="Local directory of .md/.txt source files for deep-dives.",
+    )
+    parser.add_argument(
+        "--web-search",
+        choices=["brave", "tavily"],
+        help="Optional web search provider for deep-dives.",
+    )
+    parser.add_argument(
+        "--brave-api-key",
+        help="Brave Search API key. Defaults to BRAVE_SEARCH_API_KEY.",
+    )
+    parser.add_argument(
+        "--tavily-api-key",
+        help="Tavily Search API key. Defaults to TAVILY_API_KEY.",
+    )
+    parser.add_argument(
+        "--freshness-days",
+        type=int,
+        default=730,
+        help="Requested freshness window for web sources. Default: 730.",
+    )
+    parser.add_argument(
+        "--search-results",
+        type=int,
+        default=5,
+        help="Maximum source results to provide per node. Default: 5.",
+    )
+    parser.add_argument(
+        "--search-queries",
+        type=int,
+        default=4,
+        help="Maximum planned search queries to run per node. Default: 4.",
+    )
+    parser.add_argument(
+        "--outputs-dir",
+        default=str(DEFAULT_OUTPUTS_DIR),
+        help=f"Run artifact output directory. Default: {DEFAULT_OUTPUTS_DIR}",
+    )
+    parser.add_argument("--max-depth", type=int, default=1)
+    parser.add_argument("--max-total-nodes", type=int, default=3)
 
 
 def _ollama_model_from_args(args: argparse.Namespace) -> OllamaModelClient:
@@ -615,7 +1100,25 @@ def _ollama_model_from_args(args: argparse.Namespace) -> OllamaModelClient:
         temperature=args.temperature,
         num_predict=args.num_predict,
         enable_thinking=args.think,
+        keep_alive=args.keep_alive,
         timeout_seconds=args.timeout_seconds,
+    )
+
+
+def _openrouter_model_from_args(args: argparse.Namespace) -> OpenRouterModelClient:
+    return OpenRouterModelClient(
+        model_name=args.model,
+        api_key=args.openrouter_api_key,
+        base_url=args.base_url,
+        temperature=args.temperature,
+        max_tokens=args.num_predict,
+        timeout_seconds=args.timeout_seconds,
+        app_title=args.openrouter_title,
+        http_referer=args.openrouter_referer,
+        provider_order=args.openrouter_providers,
+        allow_fallbacks=not args.openrouter_no_fallbacks,
+        require_parameters=args.openrouter_require_parameters,
+        response_format_mode=args.openrouter_response_format,
     )
 
 
@@ -625,6 +1128,116 @@ def _default_audit_path(run_id: str) -> Path:
 
 def _default_dossier_path(run_id: str) -> Path:
     return DEFAULT_OUTPUTS_DIR / run_id / "dossier.md"
+
+
+def _audit_progress_callback(
+    outputs_dir: Path,
+    *,
+    verbose: bool = True,
+):
+    last_summary: list[str | None] = [None]
+
+    def callback(conn: sqlite3.Connection, run_id: str) -> None:
+        write_audit_markdown(
+            conn,
+            run_id=run_id,
+            output_path=outputs_dir / run_id / "audit.md",
+        )
+        if not verbose:
+            return
+        summary = _run_progress_summary(conn, run_id)
+        if summary != last_summary[0]:
+            _log(f"[run {run_id}] {summary}")
+            last_summary[0] = summary
+
+    return callback
+
+
+def _run_progress_summary(conn: sqlite3.Connection, run_id: str) -> str:
+    run = db.get_run(conn, run_id)
+    rows = conn.execute(
+        """
+        SELECT status, COUNT(*) AS count
+        FROM nodes
+        WHERE run_id = ?
+        GROUP BY status
+        ORDER BY status
+        """,
+        (run_id,),
+    ).fetchall()
+    counts = {row["status"]: int(row["count"]) for row in rows}
+    total = sum(counts.values())
+    parts = [
+        f"status={run.status}",
+        f"nodes={total}",
+        f"pending={counts.get('pending', 0)}",
+        f"waiting={counts.get('waiting_for_children', 0)}",
+        f"complete={counts.get('complete', 0)}",
+        f"failed={counts.get('failed', 0)}",
+    ]
+    return " ".join(parts)
+
+
+def _log(message: str) -> None:
+    print(f"[{_timestamp()}] {message}", flush=True)
+
+
+def _timestamp() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _model_call_metadata(output_json: str | None) -> dict[str, object]:
+    if not output_json:
+        return {}
+    try:
+        payload = json.loads(output_json)
+    except json.JSONDecodeError:
+        return {}
+    metadata = payload.get("_model_response_metadata")
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _model_call_to_dict(call: db.ModelCallDetail) -> dict[str, object]:
+    return {
+        "call_id": call.call_id,
+        "run_id": call.run_id,
+        "node_id": call.node_id,
+        "call_type": call.call_type,
+        "model_name": call.model_name,
+        "prompt_version": call.prompt_version,
+        "input": _parse_json_value(call.input_json),
+        "output_json": _parse_json_value(call.output_json),
+        "output_text": call.output_text,
+        "error": call.error,
+        "started_at": call.started_at,
+        "completed_at": call.completed_at,
+    }
+
+
+def _parse_json_value(value: str | None) -> object:
+    if value is None:
+        return None
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
+
+
+def _pretty_json_value(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, indent=2, sort_keys=True)
+
+
+def _duration_ns(value: object) -> str:
+    if not isinstance(value, int | float):
+        return ""
+    if value <= 0:
+        return "0ms"
+    milliseconds = value / 1_000_000
+    if milliseconds < 1000:
+        return f"{milliseconds:.0f}ms"
+    return f"{milliseconds / 1000:.1f}s"
 
 
 if __name__ == "__main__":

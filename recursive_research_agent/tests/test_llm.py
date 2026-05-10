@@ -5,10 +5,16 @@ import urllib.request
 from app.llm import (
     BranchSynthesisContext,
     ChildSummary,
+    DedupCheckContext,
+    DedupExistingThreadContext,
     DeepDiveContext,
     FakeModelClient,
     OllamaGenerateClient,
     OllamaModelClient,
+    OpenRouterError,
+    OpenRouterGenerateClient,
+    OpenRouterModelClient,
+    SiblingConsolidationContext,
     SourceMaterialContext,
     OllamaStructuredOutputError,
     StructuredSmokeOutput,
@@ -16,8 +22,12 @@ from app.llm import (
 from app.schemas import (
     ArbitrationDecision,
     CircularityArbitrationOutput,
+    DedupDecision,
+    DeduplicationDecisionOutput,
     DeepDiveOutput,
     ReflectOutput,
+    SearchPlanOutput,
+    SiblingConsolidationOutput,
     ScopeOutput,
 )
 
@@ -88,10 +98,50 @@ class FakeModelClientTests(unittest.TestCase):
         self.assertEqual(1, client.calls[0].payload["source_material_count"])
         self.assertEqual(0, client.calls[0].payload["prior_finding_count"])
 
+    def test_default_search_plan_records_call(self):
+        client = FakeModelClient()
+
+        output = client.search_plan(
+            company="Example Co",
+            topic="Revenue quality",
+            investigation_brief="Investigate revenue quality.",
+        )
+
+        self.assertEqual(1, len(output.queries))
+        self.assertIn("Example Co", output.queries[0].query)
+        self.assertEqual("search_plan", client.calls[0].call_type)
+
+    def test_scripted_search_plan_output_is_returned(self):
+        scripted = SearchPlanOutput.model_validate(
+            {
+                "queries": [
+                    {
+                        "query": "Example Co annual report revenue",
+                        "purpose": "Find official annual report evidence.",
+                        "source_preference": "filings",
+                        "freshness_days": None,
+                    }
+                ]
+            }
+        )
+        client = FakeModelClient(search_plan_outputs=[scripted])
+
+        output = client.search_plan(
+            company="Example Co",
+            topic="Revenue quality",
+            investigation_brief="Investigate revenue quality.",
+        )
+
+        self.assertEqual("Example Co annual report revenue", output.queries[0].query)
+
     def test_scripted_deep_dive_output_is_returned(self):
         scripted = DeepDiveOutput.model_validate(
             {
-                "analysis": "Scripted analysis. END_OF_DEEP_DIVE_ANALYSIS.",
+                "core_question": "Scripted core question.",
+                "source_assessment": "Scripted source assessment.",
+                "key_findings": ["Scripted finding."],
+                "evidence_gaps": ["Scripted gap."],
+                "conclusion": "Scripted conclusion.",
                 "abstract": "Scripted abstract.",
             }
         )
@@ -105,10 +155,8 @@ class FakeModelClientTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(
-            "Scripted analysis. END_OF_DEEP_DIVE_ANALYSIS.",
-            output.analysis,
-        )
+        self.assertIn("Scripted core question.", output.analysis)
+        self.assertIn("Scripted finding.", output.analysis)
 
     def test_reflect_defaults_to_no_children(self):
         client = FakeModelClient()
@@ -117,6 +165,56 @@ class FakeModelClientTests(unittest.TestCase):
 
         self.assertEqual(ReflectOutput(), output)
         self.assertEqual({"reflect": 1}, client.call_counts())
+
+    def test_sibling_consolidation_defaults_to_identity(self):
+        client = FakeModelClient()
+        context = SiblingConsolidationContext(
+            company="Example Co",
+            parent_topic="Power prices",
+            parent_brief="Investigate power price sensitivity.",
+            child_threads=(
+                ReflectOutput.model_validate(
+                    {"child_threads": [{"topic": "A", "description": "A.", "material": True, "priority": 1, "resolution_state": "unresolved_investigable", "evidence_basis": "direct", "investigation_brief": "Investigate A."}]}
+                ).child_threads[0],
+            ),
+        )
+
+        output = client.consolidate_siblings(context)
+
+        self.assertEqual(1, len(output.child_threads))
+        self.assertEqual("A", output.child_threads[0].topic)
+        self.assertEqual("consolidate_siblings", client.calls[0].call_type)
+
+    def test_scripted_sibling_consolidation_output_is_returned(self):
+        scripted = SiblingConsolidationOutput.model_validate(
+            {
+                "child_threads": [
+                    {
+                        "topic": "Canonical cannibalization analysis",
+                        "description": "Merge overlapping merchant price threads.",
+                        "material": True,
+                        "priority": 1,
+                        "resolution_state": "unresolved_investigable",
+                        "evidence_basis": "direct",
+                        "investigation_brief": "Investigate merchant capture prices and cannibalization together.",
+                    }
+                ],
+                "reasoning": "The siblings share the same evidence hunt.",
+            }
+        )
+        client = FakeModelClient(consolidate_sibling_outputs=[scripted])
+
+        output = client.consolidate_siblings(
+            SiblingConsolidationContext(
+                company="Example Co",
+                parent_topic="Power prices",
+                parent_brief="Investigate power price sensitivity.",
+                child_threads=(),
+            )
+        )
+
+        self.assertEqual(1, len(output.child_threads))
+        self.assertEqual("Canonical cannibalization analysis", output.child_threads[0].topic)
 
     def test_branch_synthesize_records_child_summary_count(self):
         client = FakeModelClient(branch_syntheses=["Scripted synthesis."])
@@ -134,6 +232,58 @@ class FakeModelClientTests(unittest.TestCase):
 
         self.assertEqual("Scripted synthesis.", output)
         self.assertEqual(1, client.calls[0].payload["child_summary_count"])
+
+    def test_deduplication_default_is_distinct(self):
+        client = FakeModelClient()
+
+        output = client.deduplicate_investigation(
+            DedupCheckContext(
+                company="Example Co",
+                candidate_topic="North Hoyle decommissioning",
+                candidate_brief="Investigate North Hoyle decommissioning obligations.",
+                existing_threads=(
+                    DedupExistingThreadContext(
+                        node_id="node-1",
+                        topic="Asset life assumptions",
+                        investigation_brief="Investigate asset life assumptions.",
+                        status="complete",
+                    ),
+                ),
+            )
+        )
+
+        self.assertEqual(DedupDecision.DISTINCT, output.decision)
+        self.assertEqual(
+            "North Hoyle decommissioning",
+            client.calls[0].payload["candidate_topic"],
+        )
+
+    def test_scripted_deduplication_output_is_returned(self):
+        scripted = DeduplicationDecisionOutput(
+            decision=DedupDecision.REFERENCE_EXISTING,
+            canonical_node_id="node-1",
+            reasoning="Same investigation as node-1.",
+        )
+        client = FakeModelClient(dedup_outputs=[scripted])
+
+        output = client.deduplicate_investigation(
+            DedupCheckContext(
+                company="Example Co",
+                candidate_topic="North Hoyle decommissioning adequacy",
+                candidate_brief="Check whether North Hoyle is underprovided.",
+                existing_threads=(
+                    DedupExistingThreadContext(
+                        node_id="node-1",
+                        topic="North Hoyle decommissioning provision adequacy",
+                        investigation_brief="Check whether North Hoyle is underprovided.",
+                        status="pending",
+                    ),
+                ),
+            )
+        )
+
+        self.assertEqual(DedupDecision.REFERENCE_EXISTING, output.decision)
+        self.assertEqual("node-1", output.canonical_node_id)
 
     def test_extract_findings_defaults_to_empty_findings(self):
         client = FakeModelClient()
@@ -206,6 +356,7 @@ class OllamaGenerateClientTests(unittest.TestCase):
             temperature=0.4,
             num_predict=1234,
             enable_thinking=True,
+            keep_alive="30m",
             timeout_seconds=7,
             post_json=fake_post,
         )
@@ -225,6 +376,7 @@ class OllamaGenerateClientTests(unittest.TestCase):
         self.assertEqual(7, timeout_seconds)
         self.assertEqual("gemma4:latest", payload["model"])
         self.assertEqual("Return JSON.", payload["prompt"])
+        self.assertEqual("30m", payload["keep_alive"])
         self.assertEqual("<|think|>\nSystem prompt.", payload["system"])
         self.assertTrue(payload["think"])
         self.assertFalse(payload["stream"])
@@ -233,6 +385,62 @@ class OllamaGenerateClientTests(unittest.TestCase):
             payload["options"],
         )
         self.assertIn("properties", payload["format"])
+
+    def test_generate_structured_can_omit_keep_alive(self):
+        requests = []
+
+        def fake_post(url, payload, timeout_seconds):
+            requests.append(payload)
+            return {
+                "response": (
+                    '{"company":"Example Co",'
+                    '"thread_topic":"Business overview",'
+                    '"priority":1}'
+                )
+            }
+
+        client = OllamaGenerateClient(keep_alive=None, post_json=fake_post)
+
+        client.generate_structured(
+            prompt="Return JSON.",
+            schema=StructuredSmokeOutput,
+        )
+
+        self.assertNotIn("keep_alive", requests[0])
+
+    def test_generate_structured_captures_response_metadata(self):
+        response_text = (
+            '{"company":"Example Co",'
+            '"thread_topic":"Business overview",'
+            '"priority":1}'
+        )
+        client = OllamaGenerateClient(
+            post_json=lambda url, payload, timeout_seconds: {
+                "response": response_text,
+                "done_reason": "stop",
+                "load_duration": 1_500_000_000,
+                "total_duration": 2_000_000_000,
+                "eval_count": 42,
+            }
+        )
+
+        client.generate_structured(
+            prompt="Return JSON.",
+            schema=StructuredSmokeOutput,
+        )
+
+        self.assertEqual(
+            {
+                "done_reason": "stop",
+                "load_duration": 1_500_000_000,
+                "total_duration": 2_000_000_000,
+                "eval_count": 42,
+            },
+            client.pop_last_response_metadata(),
+        )
+        self.assertIsNone(client.pop_last_response_metadata())
+        self.assertEqual(response_text, client.pop_last_response_text())
+        self.assertIsNone(client.pop_last_response_text())
 
     def test_generate_structured_rejects_length_stop(self):
         client = OllamaGenerateClient(
@@ -337,6 +545,330 @@ class OllamaGenerateClientTests(unittest.TestCase):
         self.assertIn("model not found", str(exc.exception))
 
 
+class OpenRouterGenerateClientTests(unittest.TestCase):
+    def test_generate_structured_posts_chat_completion_schema(self):
+        requests = []
+
+        def fake_post(url, payload, timeout_seconds, headers):
+            requests.append((url, payload, timeout_seconds, headers))
+            return {
+                "id": "gen-123",
+                "model": "openai/gpt-4.1",
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "native_finish_reason": "stop",
+                        "message": {
+                            "content": (
+                                '{"company":"Example Co",'
+                                '"thread_topic":"Business overview",'
+                                '"priority":1}'
+                            )
+                        },
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 20,
+                    "total_tokens": 30,
+                    "cost": 0.001,
+                },
+            }
+
+        client = OpenRouterGenerateClient(
+            model_name="openai/gpt-4.1",
+            api_key="test-key",
+            base_url="https://openrouter.ai/api/v1/",
+            temperature=0.2,
+            max_tokens=123,
+            timeout_seconds=9,
+            app_title="test-app",
+            http_referer="https://example.com",
+            post_json=fake_post,
+        )
+
+        output = client.generate_structured(
+            prompt="Return JSON.",
+            system="System prompt.",
+            schema=StructuredSmokeOutput,
+        )
+
+        self.assertEqual("Example Co", output.company)
+        url, payload, timeout_seconds, headers = requests[0]
+        self.assertEqual("https://openrouter.ai/api/v1/chat/completions", url)
+        self.assertEqual(9, timeout_seconds)
+        self.assertEqual("Bearer test-key", headers["Authorization"])
+        self.assertEqual("test-app", headers["X-Title"])
+        self.assertEqual("https://example.com", headers["HTTP-Referer"])
+        self.assertEqual("openai/gpt-4.1", payload["model"])
+        self.assertEqual(0.2, payload["temperature"])
+        self.assertEqual(123, payload["max_tokens"])
+        self.assertEqual(
+            [
+                {"role": "system", "content": "System prompt."},
+                {"role": "user", "content": "Return JSON."},
+            ],
+            payload["messages"],
+        )
+        self.assertEqual("json_schema", payload["response_format"]["type"])
+        schema_payload = payload["response_format"]["json_schema"]
+        self.assertTrue(schema_payload["strict"])
+        self.assertIn("properties", schema_payload["schema"])
+        self.assertNotIn("provider", payload)
+
+        metadata = client.pop_last_response_metadata()
+        self.assertEqual("openrouter", metadata["provider"])
+        self.assertEqual("openai/gpt-4.1", metadata["requested_model"])
+        self.assertEqual("openai/gpt-4.1", metadata["resolved_model"])
+        self.assertEqual("stop", metadata["finish_reason"])
+        self.assertEqual(30, metadata["total_tokens"])
+        self.assertEqual(0.001, metadata["cost"])
+
+    def test_generate_structured_can_route_to_specific_openrouter_provider(self):
+        requests = []
+
+        def fake_post(url, payload, timeout_seconds, headers):
+            requests.append(payload)
+            return {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": (
+                                '{"company":"Example Co",'
+                                '"thread_topic":"Business overview",'
+                                '"priority":1}'
+                            )
+                        },
+                    }
+                ],
+            }
+
+        client = OpenRouterGenerateClient(
+            model_name="anthropic/claude-sonnet-4.5",
+            api_key="test-key",
+            provider_order=("anthropic",),
+            allow_fallbacks=False,
+            require_parameters=True,
+            post_json=fake_post,
+        )
+
+        client.generate_structured(
+            prompt="Return JSON.",
+            schema=StructuredSmokeOutput,
+        )
+
+        provider = requests[0]["provider"]
+        self.assertEqual(["anthropic"], provider["order"])
+        self.assertFalse(provider["allow_fallbacks"])
+        self.assertTrue(provider["require_parameters"])
+
+        metadata = client.pop_last_response_metadata()
+        self.assertEqual(["anthropic"], metadata["provider_order"])
+        self.assertFalse(metadata["allow_fallbacks"])
+        self.assertTrue(metadata["require_parameters"])
+
+    def test_generate_structured_can_use_json_object_response_format(self):
+        requests = []
+
+        def fake_post(url, payload, timeout_seconds, headers):
+            requests.append(payload)
+            return {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": (
+                                '{"company":"Example Co",'
+                                '"thread_topic":"Business overview",'
+                                '"priority":1}'
+                            )
+                        },
+                    }
+                ],
+            }
+
+        client = OpenRouterGenerateClient(
+            model_name="anthropic/claude-opus-4.7",
+            api_key="test-key",
+            response_format_mode="json_object",
+            post_json=fake_post,
+        )
+
+        output = client.generate_structured(
+            prompt="Return JSON.",
+            schema=StructuredSmokeOutput,
+        )
+
+        self.assertEqual("Example Co", output.company)
+        self.assertEqual({"type": "json_object"}, requests[0]["response_format"])
+        self.assertIn("JSON Schema", requests[0]["messages"][0]["content"])
+        self.assertIn("thread_topic", requests[0]["messages"][0]["content"])
+
+    def test_generate_structured_can_use_prompt_only_json_mode(self):
+        requests = []
+
+        def fake_post(url, payload, timeout_seconds, headers):
+            requests.append(payload)
+            return {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": (
+                                '{"company":"Example Co",'
+                                '"thread_topic":"Business overview",'
+                                '"priority":1}'
+                            )
+                        },
+                    }
+                ],
+            }
+
+        client = OpenRouterGenerateClient(
+            model_name="anthropic/claude-opus-4.7",
+            api_key="test-key",
+            response_format_mode="none",
+            post_json=fake_post,
+        )
+
+        client.generate_structured(
+            prompt="Return JSON.",
+            schema=StructuredSmokeOutput,
+        )
+
+        self.assertNotIn("response_format", requests[0])
+        self.assertIn("JSON Schema", requests[0]["messages"][0]["content"])
+
+    def test_generate_structured_requires_api_key(self):
+        client = OpenRouterGenerateClient(
+            model_name="openai/gpt-4.1",
+            api_key=None,
+            post_json=lambda url, payload, timeout_seconds, headers: {},
+        )
+        client.api_key = None
+
+        with self.assertRaises(OpenRouterError):
+            client.generate_structured(
+                prompt="Return JSON.",
+                schema=StructuredSmokeOutput,
+            )
+
+    def test_generate_structured_retries_after_invalid_json(self):
+        requests = []
+        responses = iter(
+            [
+                {
+                    "choices": [
+                        {
+                            "finish_reason": "stop",
+                            "message": {
+                                "content": '{"company":"Example Co",'
+                            },
+                        }
+                    ],
+                },
+                {
+                    "choices": [
+                        {
+                            "finish_reason": "stop",
+                            "message": {
+                                "content": (
+                                    '{"company":"Example Co",'
+                                    '"thread_topic":"Business overview",'
+                                    '"priority":1}'
+                                )
+                            },
+                        }
+                    ],
+                },
+            ]
+        )
+
+        def fake_post(url, payload, timeout_seconds, headers):
+            requests.append(payload)
+            return next(responses)
+
+        client = OpenRouterGenerateClient(
+            model_name="openai/gpt-4.1",
+            api_key="test-key",
+            post_json=fake_post,
+        )
+
+        output = client.generate_structured(
+            prompt="Return JSON.",
+            schema=StructuredSmokeOutput,
+        )
+
+        self.assertEqual("Example Co", output.company)
+        self.assertEqual(2, len(requests))
+        self.assertIn("previous response could not be parsed", requests[1]["messages"][-1]["content"].lower())
+
+    def test_generate_structured_accepts_fenced_json_response(self):
+        def fake_post(url, payload, timeout_seconds, headers):
+            return {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": (
+                                "```json\n"
+                                '{"company":"Example Co",'
+                                '"thread_topic":"Business overview",'
+                                '"priority":1}\n'
+                                "```"
+                            )
+                        },
+                    }
+                ],
+            }
+
+        client = OpenRouterGenerateClient(
+            model_name="openai/gpt-4.1",
+            api_key="test-key",
+            post_json=fake_post,
+        )
+
+        output = client.generate_structured(
+            prompt="Return JSON.",
+            schema=StructuredSmokeOutput,
+        )
+
+        self.assertEqual("Example Co", output.company)
+
+    def test_generate_structured_accepts_json_embedded_in_text(self):
+        def fake_post(url, payload, timeout_seconds, headers):
+            return {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": (
+                                "Here is the requested object:\n"
+                                '{"company":"Example Co",'
+                                '"thread_topic":"Business overview",'
+                                '"priority":1}\n'
+                                "Let me know if you want changes."
+                            )
+                        },
+                    }
+                ],
+            }
+
+        client = OpenRouterGenerateClient(
+            model_name="openai/gpt-4.1",
+            api_key="test-key",
+            post_json=fake_post,
+        )
+
+        output = client.generate_structured(
+            prompt="Return JSON.",
+            schema=StructuredSmokeOutput,
+        )
+
+        self.assertEqual("Business overview", output.thread_topic)
+
+
 class OllamaModelClientTests(unittest.TestCase):
     def test_scope_uses_scope_schema_and_prompt(self):
         requests = []
@@ -384,7 +916,7 @@ class OllamaModelClientTests(unittest.TestCase):
 
         self.assertEqual([], output.findings)
 
-    def test_ollama_branch_synthesis_placeholder_uses_child_summaries(self):
+    def test_ollama_branch_synthesis_fallback_uses_child_summaries(self):
         client = OllamaModelClient()
 
         output = client.branch_synthesize(
@@ -398,8 +930,8 @@ class OllamaModelClientTests(unittest.TestCase):
             )
         )
 
-        self.assertIn("Branch synthesis placeholder", output)
-        self.assertIn("Child summary", output)
+        self.assertIn("Child investigation capture:", output)
+        self.assertIn("Child: Child summary.", output)
 
     def test_deep_dive_uses_deep_dive_schema_and_prompt(self):
         requests = []
@@ -408,10 +940,13 @@ class OllamaModelClientTests(unittest.TestCase):
             requests.append(payload)
             return {
                 "response": (
-                    '{"analysis":"Analysis states what evidence must be checked. '
-                    'END_OF_DEEP_DIVE_ANALYSIS.",'
+                    '{"core_question":"Assess Example Co revenue quality.",'
+                    '"source_assessment":"The supplied source is an annual report excerpt.",'
+                    '"key_findings":["Source 1 states what evidence must be checked."],'
+                    '"evidence_gaps":["The source does not disclose retention."],'
+                    '"conclusion":"The supplied source supports a narrow revenue observation.",'
                     '"abstract":"Example Co abstract for revenue quality.",'
-                    '"contradictions":[],'
+                    '"contradictions":[],' 
                     '"discovered_threads":[]}'
                 )
             }
@@ -430,6 +965,9 @@ class OllamaModelClientTests(unittest.TestCase):
                         source_type="primary_filing",
                         published_at="2026-01-01",
                         text="Example Co reported segment revenue.",
+                        retrieved_at="2026-05-09T10:30:00Z",
+                        source_date_basis="filing_period",
+                        staleness_note="Current filing period.",
                     ),
                 ),
             )
@@ -440,9 +978,183 @@ class OllamaModelClientTests(unittest.TestCase):
         self.assertIn("deep-dive component", request["system"])
         self.assertIn("Revenue quality", request["prompt"])
         self.assertIn("Annual report excerpt", request["prompt"])
+        self.assertIn("URL: https://example.com/report", request["prompt"])
+        self.assertIn("Source date (filing_period): 2026-01-01", request["prompt"])
+        self.assertIn("Retrieved at: 2026-05-09T10:30:00Z", request["prompt"])
+        self.assertIn("Freshness note: Current filing period.", request["prompt"])
         self.assertIn("Example Co reported segment revenue.", request["prompt"])
-        self.assertIn("analysis", request["format"]["properties"])
+        self.assertIn("core_question", request["format"]["properties"])
+        self.assertNotIn("analysis", request["format"]["properties"])
         self.assertIn("discovered_threads", request["format"]["properties"])
+
+    def test_search_plan_uses_search_plan_schema_and_prompt(self):
+        requests = []
+
+        def fake_post(url, payload, timeout_seconds):
+            requests.append(payload)
+            return {
+                "response": (
+                    '{"queries":[{"query":"Example Co annual report revenue",'
+                    '"purpose":"Find official filing evidence.",'
+                    '"source_preference":"filings",'
+                    '"freshness_days":730}]}'
+                )
+            }
+
+        client = OllamaModelClient(post_json=fake_post)
+
+        output = client.search_plan(
+            company="Example Co",
+            topic="Revenue quality",
+            investigation_brief="Investigate Example Co revenue quality.",
+        )
+
+        self.assertEqual("Example Co annual report revenue", output.queries[0].query)
+        request = requests[0]
+        self.assertIn("search-planning component", request["system"])
+        self.assertIn("Revenue quality", request["prompt"])
+        self.assertIn("queries", request["format"]["properties"])
+
+    def test_deep_dive_retries_with_compact_prompt_after_validation_failure(self):
+        requests = []
+
+        def fake_post(url, payload, timeout_seconds):
+            requests.append(payload)
+            if len(requests) == 1:
+                return {
+                    "response": (
+                        '{"core_question":"Assess revenue quality.",'
+                        '"source_assessment":"The supplied source is thin.",'
+                        '"key_findings":["Source 1 states revenue grew."],'
+                        '"evidence_gaps":[],'
+                        '"conclusion":"Growth is supported.",'
+                        '"abstract":"",'
+                        '"contradictions":[],'
+                        '"discovered_threads":[]}'
+                    )
+                }
+            return {
+                "response": (
+                    '{"core_question":"Assess revenue quality.",'
+                    '"source_assessment":"The supplied source is thin.",'
+                    '"key_findings":["Source 1 states revenue grew."],'
+                    '"evidence_gaps":["The source does not disclose retention."],'
+                    '"conclusion":"Growth is supported, but durability is unresolved.",'
+                    '"abstract":"Compact abstract.",'
+                    '"contradictions":[],'
+                    '"discovered_threads":[]}'
+                )
+            }
+
+        client = OllamaModelClient(post_json=fake_post)
+
+        output = client.deep_dive(
+            DeepDiveContext(
+                company="Example Co",
+                topic="Revenue quality",
+                investigation_brief="Investigate Example Co revenue quality.",
+            )
+        )
+
+        self.assertEqual(2, len(requests))
+        self.assertIn("failed validation", requests[1]["prompt"])
+        self.assertIn("## Evidence Gaps", output.analysis)
+
+    def test_deep_dive_retries_legacy_analysis_blob(self):
+        requests = []
+
+        def fake_post(url, payload, timeout_seconds):
+            requests.append(payload)
+            if len(requests) == 1:
+                return {
+                    "response": (
+                        '{"analysis":"Analysis with valid JSON but no marker.",'
+                        '"abstract":"Abstract.",'
+                        '"contradictions":[],'
+                        '"discovered_threads":[]}'
+                    )
+                }
+            return {
+                "response": (
+                    '{"core_question":"Assess revenue quality.",'
+                    '"source_assessment":"The supplied source is thin.",'
+                    '"key_findings":["Source 1 states revenue grew."],'
+                    '"evidence_gaps":["The source does not disclose retention."],'
+                    '"conclusion":"Growth is supported, but durability is unresolved.",'
+                    '"abstract":"Compact abstract.",'
+                    '"contradictions":[],'
+                    '"discovered_threads":[]}'
+                )
+            }
+
+        client = OllamaModelClient(post_json=fake_post)
+
+        output = client.deep_dive(
+            DeepDiveContext(
+                company="Example Co",
+                topic="Revenue quality",
+                investigation_brief="Investigate Example Co revenue quality.",
+            )
+        )
+
+        self.assertEqual(2, len(requests))
+        self.assertIn("failed validation", requests[1]["prompt"])
+        self.assertIn("Growth is supported", output.analysis)
+
+    def test_deep_dive_allows_second_compact_retry(self):
+        requests = []
+
+        def fake_post(url, payload, timeout_seconds):
+            requests.append(payload)
+            if len(requests) == 1:
+                return {
+                    "response": (
+                        '{"analysis":"Analysis with valid JSON but no marker.",'
+                        '"abstract":"Abstract.",'
+                        '"contradictions":[],'
+                        '"discovered_threads":[]}'
+                    )
+                }
+            if len(requests) == 2:
+                return {
+                    "response": (
+                        '{"core_question":"Assess revenue quality.",'
+                        '"source_assessment":"The supplied source is thin.",'
+                        '"key_findings":[],'
+                        '"evidence_gaps":["The source does not disclose retention."],'
+                        '"conclusion":"Growth is supported, but durability is unresolved.",'
+                        '"abstract":"Compact abstract.",'
+                        '"contradictions":[],'
+                        '"discovered_threads":[]}'
+                    )
+                }
+            return {
+                "response": (
+                    '{"core_question":"Assess revenue quality.",'
+                    '"source_assessment":"The supplied source is thin.",'
+                    '"key_findings":["Source 1 states revenue grew."],'
+                    '"evidence_gaps":["The source does not disclose retention."],'
+                    '"conclusion":"Growth is supported, but durability is unresolved.",'
+                    '"abstract":"Second compact abstract.",'
+                    '"contradictions":[],'
+                    '"discovered_threads":[]}'
+                )
+            }
+
+        client = OllamaModelClient(post_json=fake_post)
+
+        output = client.deep_dive(
+            DeepDiveContext(
+                company="Example Co",
+                topic="Revenue quality",
+                investigation_brief="Investigate Example Co revenue quality.",
+            )
+        )
+
+        self.assertEqual(3, len(requests))
+        self.assertIn("failed validation", requests[1]["prompt"])
+        self.assertIn("failed validation", requests[2]["prompt"])
+        self.assertIn("Growth is supported", output.analysis)
 
     def test_reflect_uses_reflect_schema_and_prompt(self):
         requests = []
@@ -475,6 +1187,108 @@ class OllamaModelClientTests(unittest.TestCase):
         self.assertIn("reflection component", request["system"])
         self.assertIn("Deep-dive analysis", request["prompt"])
         self.assertIn("child_threads", request["format"]["properties"])
+
+
+class OpenRouterModelClientTests(unittest.TestCase):
+    def test_scope_uses_openrouter_chat_schema_and_prompt(self):
+        requests = []
+
+        def fake_post(url, payload, timeout_seconds, headers):
+            requests.append(payload)
+            return {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": (
+                                '{"root_threads":[{'
+                                '"topic":"Revenue quality",'
+                                '"description":"Investigate revenue durability.",'
+                                '"priority":1,'
+                                '"investigation_brief":"Investigate Example Co revenue quality."'
+                                '}]}'
+                            )
+                        },
+                    }
+                ]
+            }
+
+        client = OpenRouterModelClient(
+            model_name="openai/gpt-4.1",
+            api_key="test-key",
+            post_json=fake_post,
+        )
+
+        output = client.scope("Example Co")
+
+        self.assertEqual("Revenue quality", output.root_threads[0].topic)
+        request = requests[0]
+        self.assertEqual("openai/gpt-4.1", request["model"])
+        self.assertEqual("system", request["messages"][0]["role"])
+        self.assertIn("scoping component", request["messages"][0]["content"])
+        self.assertEqual("user", request["messages"][1]["role"])
+        self.assertIn("Example Co", request["messages"][1]["content"])
+        schema = request["response_format"]["json_schema"]["schema"]
+        self.assertIn("root_threads", schema["properties"])
+
+    def test_deep_dive_retries_with_openrouter_after_validation_failure(self):
+        requests = []
+
+        def fake_post(url, payload, timeout_seconds, headers):
+            requests.append(payload)
+            if len(requests) == 1:
+                return {
+                    "choices": [
+                        {
+                            "finish_reason": "stop",
+                            "message": {
+                                "content": (
+                                    '{"analysis":"Legacy blob.",'
+                                    '"abstract":"Abstract.",'
+                                    '"contradictions":[],' 
+                                    '"discovered_threads":[]}'
+                                )
+                            },
+                        }
+                    ]
+                }
+            return {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": (
+                                '{"core_question":"Assess revenue quality.",'
+                                '"source_assessment":"The supplied source is thin.",'
+                                '"key_findings":["Source 1 states revenue grew."],'
+                                '"evidence_gaps":["The source does not disclose retention."],'
+                                '"conclusion":"Growth is supported, but durability is unresolved.",'
+                                '"abstract":"Compact abstract.",'
+                                '"contradictions":[],' 
+                                '"discovered_threads":[]}'
+                            )
+                        },
+                    }
+                ]
+            }
+
+        client = OpenRouterModelClient(
+            model_name="openai/gpt-4.1",
+            api_key="test-key",
+            post_json=fake_post,
+        )
+
+        output = client.deep_dive(
+            DeepDiveContext(
+                company="Example Co",
+                topic="Revenue quality",
+                investigation_brief="Investigate Example Co revenue quality.",
+            )
+        )
+
+        self.assertEqual(2, len(requests))
+        self.assertIn("failed validation", requests[1]["messages"][1]["content"])
+        self.assertIn("Growth is supported", output.analysis)
 
 
 if __name__ == "__main__":

@@ -90,12 +90,9 @@ def _render_audit_node(
     lines.append(f"{indent}  - Resolution: `{node.resolution_state}`")
     lines.append(f"{indent}  - Evidence basis: `{node.evidence_basis}`")
 
-    if node.status == NodeState.REFERENCE:
-        reference = db.node_reference(conn, node.node_id)
-        if reference is not None:
-            lines.append(
-                f"{indent}  - Reference to: `{reference['canonical_node_id']}`"
-            )
+    reference = db.node_reference(conn, node.node_id)
+    if reference is not None:
+        lines.append(f"{indent}  - Reference to: `{reference['canonical_node_id']}`")
 
     if node.status == NodeState.REJECTED:
         rejection = db.node_rejection(conn, node.node_id)
@@ -106,6 +103,13 @@ def _render_audit_node(
                     f"{indent}  - Duplicated ancestor: "
                     f"`{rejection['duplicated_ancestor_id']}`"
                 )
+
+    if node.status == NodeState.FAILED:
+        failures = db.node_failures(conn, node.node_id)
+        if failures:
+            latest = failures[-1]
+            lines.append(f"{indent}  - Latest failure attempt: `{latest.attempt}`")
+            lines.append(f"{indent}  - Latest failure: {latest.error}")
 
     if node.triggering_text_span:
         lines.append(f"{indent}  - Triggering span: {node.triggering_text_span}")
@@ -133,13 +137,12 @@ def _render_dossier_node(
     lines.append(f"{'#' * heading_level} {node.topic}")
     lines.append("")
 
-    if node.status == NodeState.REFERENCE:
-        reference = db.node_reference(conn, node.node_id)
-        if reference is not None:
-            lines.append(
-                f"Reference node. See canonical node `{reference['canonical_node_id']}`."
-            )
-            lines.append("")
+    reference = db.node_reference(conn, node.node_id)
+    if reference is not None:
+        lines.append(
+            f"Reference node. See canonical node `{reference['canonical_node_id']}`."
+        )
+        lines.append("")
         return
 
     origins = db.canonical_reference_origins(conn, node.node_id)
@@ -162,6 +165,13 @@ def _render_dossier_node(
         lines.append("")
     elif node.status == NodeState.FAILED:
         lines.append(f"[investigation failed: {node.topic}]")
+        failures = db.node_failures(conn, node.node_id)
+        if failures:
+            latest = failures[-1]
+            lines.append("")
+            lines.append(f"Latest failure attempt: `{latest.attempt}`")
+            lines.append("")
+            lines.append(f"Latest failure: {latest.error}")
         lines.append("")
     else:
         lines.append(f"_[{node.status.value}: analysis not available yet]_")
