@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import tomllib
 
 from app import db
 from app.llm import DeepDiveContext, SourceMaterialContext
@@ -32,11 +33,13 @@ from app.search import (
 
 DEFAULT_DB_PATH = Path("data") / "research.sqlite"
 DEFAULT_OUTPUTS_DIR = Path("outputs") / "runs"
+DEFAULT_SETTINGS_PATH = Path("research.toml")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    _apply_settings_profile(args)
     return args.func(args)
 
 
@@ -254,50 +257,10 @@ def build_parser() -> argparse.ArgumentParser:
         "ollama-run",
         help="Run a guarded real Ollama recursive pass using configured sources.",
     )
-    _add_ollama_args(ollama_run)
+    _add_ollama_args(ollama_run, profiled=True)
     ollama_run.add_argument("company", help="Company name.")
-    ollama_run.add_argument(
-        "--source-dir",
-        help="Local directory of .md/.txt source files for deep-dives.",
-    )
-    ollama_run.add_argument(
-        "--web-search",
-        choices=["brave", "tavily"],
-        help="Optional web search provider for deep-dives.",
-    )
-    ollama_run.add_argument(
-        "--brave-api-key",
-        help="Brave Search API key. Defaults to BRAVE_SEARCH_API_KEY.",
-    )
-    ollama_run.add_argument(
-        "--tavily-api-key",
-        help="Tavily Search API key. Defaults to TAVILY_API_KEY.",
-    )
-    ollama_run.add_argument(
-        "--freshness-days",
-        type=int,
-        default=730,
-        help="Requested freshness window for web sources. Default: 730.",
-    )
-    ollama_run.add_argument(
-        "--search-results",
-        type=int,
-        default=5,
-        help="Maximum source results to provide per node. Default: 5.",
-    )
-    ollama_run.add_argument(
-        "--search-queries",
-        type=int,
-        default=4,
-        help="Maximum planned search queries to run per node. Default: 4.",
-    )
-    ollama_run.add_argument(
-        "--outputs-dir",
-        default=str(DEFAULT_OUTPUTS_DIR),
-        help=f"Run artifact output directory. Default: {DEFAULT_OUTPUTS_DIR}",
-    )
-    ollama_run.add_argument("--max-depth", type=int, default=1)
-    ollama_run.add_argument("--max-total-nodes", type=int, default=3)
+    _add_run_source_args(ollama_run, profiled=True)
+    _add_profile_args(ollama_run)
     ollama_run.set_defaults(func=cmd_ollama_run)
 
     openrouter_run = subparsers.add_parser(
@@ -307,9 +270,10 @@ def build_parser() -> argparse.ArgumentParser:
             "configured local/web sources."
         ),
     )
-    _add_openrouter_args(openrouter_run)
+    _add_openrouter_args(openrouter_run, profiled=True)
     openrouter_run.add_argument("company", help="Company name.")
-    _add_run_source_args(openrouter_run)
+    _add_run_source_args(openrouter_run, profiled=True)
+    _add_profile_args(openrouter_run)
     openrouter_run.set_defaults(func=cmd_openrouter_run)
 
     return parser
@@ -926,48 +890,172 @@ def _search_provider_from_args(
     return CompositeSearchProvider(providers)
 
 
-def _add_ollama_args(parser: argparse.ArgumentParser) -> None:
+def _apply_settings_profile(args: argparse.Namespace) -> None:
+    profile_name = getattr(args, "profile", None)
+    command_name = getattr(getattr(args, "func", None), "__name__", None)
+    defaults = _profile_defaults_for_command(command_name)
+    if not defaults:
+        return
+
+    profile: dict[str, object] = {}
+    if profile_name:
+        settings_file = Path(getattr(args, "settings_file", DEFAULT_SETTINGS_PATH))
+        profile = _load_profile(settings_file, profile_name)
+
+    for key, default_value in defaults.items():
+        current_value = getattr(args, key, None)
+        if current_value is not None:
+            continue
+        if key in profile:
+            setattr(args, key, profile[key])
+        else:
+            setattr(args, key, default_value)
+
+    _apply_profile_postprocessing(args)
+
+
+def _load_profile(settings_file: Path, profile_name: str) -> dict[str, object]:
+    if not settings_file.exists():
+        raise SystemExit(
+            f"Profile {profile_name!r} requested, but settings file was not found: "
+            f"{settings_file}"
+        )
+    try:
+        data = tomllib.loads(settings_file.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        raise SystemExit(
+            f"Settings file is not valid TOML: {settings_file}: {exc}"
+        ) from exc
+
+    profiles = data.get("profiles")
+    if not isinstance(profiles, dict):
+        raise SystemExit(
+            f"Settings file does not define a [profiles] table: {settings_file}"
+        )
+    profile = profiles.get(profile_name)
+    if not isinstance(profile, dict):
+        raise SystemExit(
+            f"Profile {profile_name!r} was not found in settings file: {settings_file}"
+        )
+    return dict(profile)
+
+
+def _profile_defaults_for_command(command_name: str | None) -> dict[str, object]:
+    common = {
+        "source_dir": None,
+        "web_search": None,
+        "brave_api_key": None,
+        "tavily_api_key": None,
+        "freshness_days": 730,
+        "search_results": 5,
+        "search_queries": 4,
+        "outputs_dir": str(DEFAULT_OUTPUTS_DIR),
+        "max_depth": 1,
+        "max_total_nodes": 3,
+    }
+    if command_name == "cmd_ollama_run":
+        return {
+            **common,
+            "model": "gemma4:latest",
+            "base_url": "http://localhost:11434",
+            "temperature": 1.0,
+            "num_predict": 4096,
+            "think": False,
+            "keep_alive": "5m",
+            "timeout_seconds": 120.0,
+        }
+    if command_name == "cmd_openrouter_run":
+        return {
+            **common,
+            "base_url": "https://openrouter.ai/api/v1",
+            "openrouter_api_key": os.environ.get("OPENROUTER_API_KEY"),
+            "temperature": 1.0,
+            "num_predict": 4096,
+            "timeout_seconds": 120.0,
+            "openrouter_title": "recursive-research-agent",
+            "openrouter_referer": None,
+            "openrouter_providers": [],
+            "openrouter_no_fallbacks": False,
+            "openrouter_require_parameters": False,
+            "openrouter_response_format": "json_schema",
+            "openrouter_max_transient_retries": 3,
+            "openrouter_retry_base_delay_seconds": 1.0,
+        }
+    return {}
+
+
+def _apply_profile_postprocessing(args: argparse.Namespace) -> None:
+    providers = getattr(args, "openrouter_providers", None)
+    if isinstance(providers, str):
+        args.openrouter_providers = [providers]
+
+
+def _add_profile_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--profile",
+        help="Named profile from research.toml to apply before CLI overrides.",
+    )
+    parser.add_argument(
+        "--settings-file",
+        default=str(DEFAULT_SETTINGS_PATH),
+        help=(
+            "TOML settings file containing named profiles. "
+            f"Default: {DEFAULT_SETTINGS_PATH}"
+        ),
+    )
+
+
+def _add_ollama_args(
+    parser: argparse.ArgumentParser,
+    *,
+    profiled: bool = False,
+) -> None:
     parser.add_argument(
         "--model",
-        default="gemma4:latest",
+        default=None if profiled else "gemma4:latest",
         help="Ollama model name. Default: gemma4:latest",
     )
     parser.add_argument(
         "--base-url",
-        default="http://localhost:11434",
+        default=None if profiled else "http://localhost:11434",
         help="Ollama base URL. Default: http://localhost:11434",
     )
     parser.add_argument(
         "--temperature",
         type=float,
-        default=1.0,
+        default=None if profiled else 1.0,
         help="Model temperature. Default: 1.0",
     )
     parser.add_argument(
         "--num-predict",
         type=int,
-        default=4096,
+        default=None if profiled else 4096,
         help="Maximum generated tokens. Default: 4096",
     )
     parser.add_argument(
         "--think",
         action="store_true",
+        default=None if profiled else False,
         help="Enable Ollama/Gemma thinking mode.",
     )
     parser.add_argument(
         "--keep-alive",
-        default="5m",
+        default=None if profiled else "5m",
         help="How long Ollama should keep the model loaded. Default: 5m",
     )
     parser.add_argument(
         "--timeout-seconds",
         type=float,
-        default=120.0,
+        default=None if profiled else 120.0,
         help="HTTP timeout in seconds. Default: 120",
     )
 
 
-def _add_openrouter_args(parser: argparse.ArgumentParser) -> None:
+def _add_openrouter_args(
+    parser: argparse.ArgumentParser,
+    *,
+    profiled: bool = False,
+) -> None:
     parser.add_argument(
         "--model",
         required=True,
@@ -978,35 +1066,35 @@ def _add_openrouter_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--base-url",
-        default="https://openrouter.ai/api/v1",
+        default=None if profiled else "https://openrouter.ai/api/v1",
         help="OpenRouter API base URL. Default: https://openrouter.ai/api/v1",
     )
     parser.add_argument(
         "--openrouter-api-key",
-        default=os.environ.get("OPENROUTER_API_KEY"),
+        default=None if profiled else os.environ.get("OPENROUTER_API_KEY"),
         help="OpenRouter API key. Defaults to OPENROUTER_API_KEY.",
     )
     parser.add_argument(
         "--temperature",
         type=float,
-        default=1.0,
+        default=None if profiled else 1.0,
         help="Model temperature. Default: 1.0",
     )
     parser.add_argument(
         "--num-predict",
         type=int,
-        default=4096,
+        default=None if profiled else 4096,
         help="Maximum generated tokens. Default: 4096.",
     )
     parser.add_argument(
         "--timeout-seconds",
         type=float,
-        default=120.0,
+        default=None if profiled else 120.0,
         help="HTTP timeout in seconds. Default: 120",
     )
     parser.add_argument(
         "--openrouter-title",
-        default="recursive-research-agent",
+        default=None if profiled else "recursive-research-agent",
         help="Optional X-Title header for OpenRouter rankings.",
     )
     parser.add_argument(
@@ -1016,7 +1104,7 @@ def _add_openrouter_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--openrouter-provider",
         action="append",
-        default=[],
+        default=None if profiled else [],
         dest="openrouter_providers",
         help=(
             "OpenRouter provider slug to prefer, for example 'anthropic'. "
@@ -1026,11 +1114,13 @@ def _add_openrouter_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--openrouter-no-fallbacks",
         action="store_true",
+        default=None if profiled else False,
         help="Disable fallback to other OpenRouter providers.",
     )
     parser.add_argument(
         "--openrouter-require-parameters",
         action="store_true",
+        default=None if profiled else False,
         help=(
             "Only route to providers that support all request parameters, "
             "including structured JSON response_format."
@@ -1039,16 +1129,32 @@ def _add_openrouter_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--openrouter-response-format",
         choices=["json_schema", "json_object", "none"],
-        default="json_schema",
+        default=None if profiled else "json_schema",
         help=(
             "Structured response mode. json_schema is strict but needs provider "
             "support; json_object is looser and works with more providers; none "
             "uses prompt-only JSON instructions. Default: json_schema."
         ),
     )
+    parser.add_argument(
+        "--openrouter-max-transient-retries",
+        type=int,
+        default=None if profiled else 3,
+        help="Retries for transient OpenRouter upstream failures. Default: 3.",
+    )
+    parser.add_argument(
+        "--openrouter-retry-base-delay-seconds",
+        type=float,
+        default=None if profiled else 1.0,
+        help="Base delay for OpenRouter retry backoff. Default: 1.0.",
+    )
 
 
-def _add_run_source_args(parser: argparse.ArgumentParser) -> None:
+def _add_run_source_args(
+    parser: argparse.ArgumentParser,
+    *,
+    profiled: bool = False,
+) -> None:
     parser.add_argument(
         "--source-dir",
         help="Local directory of .md/.txt source files for deep-dives.",
@@ -1069,28 +1175,32 @@ def _add_run_source_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--freshness-days",
         type=int,
-        default=730,
+        default=None if profiled else 730,
         help="Requested freshness window for web sources. Default: 730.",
     )
     parser.add_argument(
         "--search-results",
         type=int,
-        default=5,
+        default=None if profiled else 5,
         help="Maximum source results to provide per node. Default: 5.",
     )
     parser.add_argument(
         "--search-queries",
         type=int,
-        default=4,
+        default=None if profiled else 4,
         help="Maximum planned search queries to run per node. Default: 4.",
     )
     parser.add_argument(
         "--outputs-dir",
-        default=str(DEFAULT_OUTPUTS_DIR),
+        default=None if profiled else str(DEFAULT_OUTPUTS_DIR),
         help=f"Run artifact output directory. Default: {DEFAULT_OUTPUTS_DIR}",
     )
-    parser.add_argument("--max-depth", type=int, default=1)
-    parser.add_argument("--max-total-nodes", type=int, default=3)
+    parser.add_argument("--max-depth", type=int, default=None if profiled else 1)
+    parser.add_argument(
+        "--max-total-nodes",
+        type=int,
+        default=None if profiled else 3,
+    )
 
 
 def _ollama_model_from_args(args: argparse.Namespace) -> OllamaModelClient:
@@ -1119,6 +1229,8 @@ def _openrouter_model_from_args(args: argparse.Namespace) -> OpenRouterModelClie
         allow_fallbacks=not args.openrouter_no_fallbacks,
         require_parameters=args.openrouter_require_parameters,
         response_format_mode=args.openrouter_response_format,
+        max_transient_retries=args.openrouter_max_transient_retries,
+        transient_retry_base_delay_seconds=args.openrouter_retry_base_delay_seconds,
     )
 
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 from collections import defaultdict, deque
@@ -607,6 +608,9 @@ class OpenRouterGenerateClient:
         allow_fallbacks: bool = True,
         require_parameters: bool = False,
         response_format_mode: str = "json_schema",
+        max_transient_retries: int = 3,
+        transient_retry_base_delay_seconds: float = 1.0,
+        sleep: Callable[[float], None] | None = None,
         post_json: HeaderJsonPoster | None = None,
     ) -> None:
         if response_format_mode not in {"json_schema", "json_object", "none"}:
@@ -625,6 +629,11 @@ class OpenRouterGenerateClient:
         self.allow_fallbacks = allow_fallbacks
         self.require_parameters = require_parameters
         self.response_format_mode = response_format_mode
+        self.max_transient_retries = max(0, max_transient_retries)
+        self.transient_retry_base_delay_seconds = max(
+            0.0, transient_retry_base_delay_seconds
+        )
+        self._sleep = sleep or time.sleep
         self._post_json = post_json or _post_openrouter_json
         self._last_response_metadata: JsonPayload | None = None
         self._last_response_text: str | None = None
@@ -731,11 +740,10 @@ class OpenRouterGenerateClient:
         if self.app_title:
             headers["X-Title"] = self.app_title
 
-        response = self._post_json(
-            f"{self.base_url}/chat/completions",
-            payload,
-            self.timeout_seconds,
-            headers,
+        response = self._post_openrouter_with_retries(
+            url=f"{self.base_url}/chat/completions",
+            payload=payload,
+            headers=headers,
         )
         normalized = self._normalize_chat_completion(response)
         self._last_response_metadata = normalized.get("_model_response_metadata")
@@ -781,6 +789,38 @@ class OpenRouterGenerateClient:
             ) from exc
 
         return schema.model_validate(parsed)
+
+    def _post_openrouter_with_retries(
+        self,
+        *,
+        url: str,
+        payload: JsonPayload,
+        headers: dict[str, str],
+    ) -> JsonPayload:
+        last_error: OpenRouterError | None = None
+        for attempt in range(self.max_transient_retries + 1):
+            try:
+                return self._post_json(
+                    url,
+                    payload,
+                    self.timeout_seconds,
+                    headers,
+                )
+            except OpenRouterError as exc:
+                last_error = exc
+                if (
+                    attempt >= self.max_transient_retries
+                    or not _is_retryable_openrouter_error(exc)
+                ):
+                    raise
+                delay_seconds = self.transient_retry_base_delay_seconds * (
+                    2**attempt
+                )
+                if delay_seconds > 0:
+                    self._sleep(delay_seconds)
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("OpenRouter retry loop exited without a response")
 
     def _normalize_chat_completion(self, response: JsonPayload) -> JsonPayload:
         choices = response.get("choices")
@@ -861,6 +901,9 @@ class OpenRouterModelClient:
         allow_fallbacks: bool = True,
         require_parameters: bool = False,
         response_format_mode: str = "json_schema",
+        max_transient_retries: int = 3,
+        transient_retry_base_delay_seconds: float = 1.0,
+        sleep: Callable[[float], None] | None = None,
         post_json: HeaderJsonPoster | None = None,
     ) -> None:
         self.generate_client = OpenRouterGenerateClient(
@@ -876,6 +919,9 @@ class OpenRouterModelClient:
             allow_fallbacks=allow_fallbacks,
             require_parameters=require_parameters,
             response_format_mode=response_format_mode,
+            max_transient_retries=max_transient_retries,
+            transient_retry_base_delay_seconds=transient_retry_base_delay_seconds,
+            sleep=sleep,
             post_json=post_json,
         )
 
@@ -1536,6 +1582,21 @@ def _with_gemma_thinking_token(system: str, *, enable_thinking: bool) -> str:
     if not enable_thinking or system.startswith("<|think|>"):
         return system
     return f"<|think|>\n{system}"
+
+
+def _is_retryable_openrouter_error(exc: OpenRouterError) -> bool:
+    message = str(exc).lower()
+    retry_markers = (
+        "http 429",
+        "temporarily rate-limited",
+        "rate-limited upstream",
+        "rate limit",
+        "http 502",
+        "http 503",
+        "http 504",
+        "http 408",
+    )
+    return any(marker in message for marker in retry_markers)
 
 
 def _post_json(url: str, payload: JsonPayload, timeout_seconds: float) -> JsonPayload:

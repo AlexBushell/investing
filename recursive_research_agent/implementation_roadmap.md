@@ -850,7 +850,7 @@ Once that is true, real search, real Ollama calls, deduplication, findings memor
 
 ## Current Status Checkpoint
 
-Last refreshed: 2026-05-09.
+Last refreshed: 2026-05-10.
 
 Use this section as the living checkpoint when returning to the project. Update
 the date, the tested command set, and the "next checkpoint" notes whenever a
@@ -888,13 +888,26 @@ Model boundary:
   - search planning
   - deep dive
   - reflection
+- OpenRouter-backed structured calls for:
+  - scope
+  - search planning
+  - deep dive
+  - reflection
 - Ollama keep-alive defaults to `5m`.
-- Model-provider abstraction exists conceptually but is not yet implemented for
-  hosted providers. OpenRouter is the planned next provider and should reuse
-  the same prompt/schema/search orchestration contracts.
+- Provider-neutral model boundary across:
+  - `FakeModelClient`
+  - `OllamaModelClient`
+  - `OpenRouterModelClient`
+- Structured-output hardening for hosted models includes:
+  - retry on invalid JSON / schema-shape failures
+  - parsing of fenced JSON blocks
+  - parsing of JSON embedded in surrounding prose
+- Sibling-consolidation structured output is implemented at the model boundary
+  and consumed by orchestration before child-node creation.
 - Model-call instrumentation includes:
   - timestamped CLI progress logs
   - Ollama load/total/eval metadata when available
+  - OpenRouter provider/model/finish/token/cost metadata when available
   - `research model-calls <run_id>` summary
   - `research model-call <call_id>` inspection
   - `--raw` model-call output for prompt debugging
@@ -923,12 +936,14 @@ Search and evidence:
 
 - `DirectorySearchProvider` supports deterministic local/source-fixture runs.
 - `BraveSearchProvider` supports real web discovery.
+- `TavilySearchProvider` supports real web discovery through an alternative
+  provider path.
 - `CompositeSearchProvider` can combine configured sources.
 - Search planning is model-guided but bounded by CLI/config limits.
 - Web source material carries URL, title, source type, retrieval time,
   publication/page-age metadata where available, and staleness notes.
 - Brave query length is guarded before API calls.
-- Search progress is logged at a high level during `ollama-run`.
+- Search progress is logged at a high level during real-model runs.
 
 CLI surface:
 
@@ -943,12 +958,15 @@ CLI surface:
 - `research ollama-run` with:
   - local source directory
   - Brave web search
+  - Tavily web search
   - freshness window
   - search result limit
   - planned search query limit
   - max depth
   - max total nodes
   - timeout and keep-alive controls
+- `research openrouter-run` with the same search/orchestration path and
+  provider-specific API key/model controls
 
 ### Recent Real-Model Observations
 
@@ -958,6 +976,9 @@ CLI surface:
   - no observed dangling future-plan endings in the latest run
   - cleaner dossier sections for source assessment, findings, gaps, and
     conclusion
+- Branch-synthesis placeholder text no longer appears in completed dossiers.
+  Real model clients now fall back to a deterministic branch-capture block
+  rather than emitting literal placeholder scaffolding.
 - Evidence quality is now the main bottleneck. Search snippets and generic web
   pages are not a strong enough evidence substrate for deeper reports.
 - `--search-results 3` is useful for smoke tests but often too sparse for real
@@ -967,22 +988,23 @@ CLI surface:
   this easier to manage.
 - A much deeper Microsoft run showed that deeper recursion currently creates
   too much duplicated structure:
-  - branch synthesis placeholders dominate parent sections
+  - parent sections still over-preserve nested child capture
   - child summaries are repeated at multiple ancestor levels
   - many branches reconfirm the same "not disclosed" result
   - the most important conclusion is buried rather than stated upfront
   - weak source tiers can appear beside primary sources without enough
     weighting distinction
-- The strongest analytical result from that run was not a new Microsoft fact
-  but a system finding: the dossier needs canonical findings, real synthesis,
-  source-tier weighting, negative-result budgets, and proxy-analysis pivots.
+- New Greencoat runs confirm the same pattern: output cleanliness is better,
+  but dossier quality is now primarily limited by duplicate suppression,
+  provenance visibility, and the absence of canonical findings / negative-result
+  controls.
 
 ### Known Gaps
 
 Execution/model:
 
-- Ollama branch synthesis is still a placeholder implementation.
-- OpenRouter support is not implemented yet.
+- Branch synthesis is still a deterministic fallback rather than a true
+  parent-level interpretive synthesis call.
 - Model-native tools, including OpenRouter web/search tools, are not integrated
   and should remain outside the default evidence path until their outputs can
   be normalized into auditable `SourceMaterial` records.
@@ -994,8 +1016,8 @@ Execution/model:
 Dossier assembly and analysis quality:
 
 - Completed dossiers still render the tree too literally.
-- Parent branch sections can contain placeholder synthesis rather than real
-  interpretation.
+- Parent branch sections still do not provide real cross-child interpretation;
+  they use branch-capture fallback text instead.
 - Repeated child summaries are duplicated across ancestor levels.
 - There is no executive conclusion or reader-first headline section.
 - Repeated negative findings are not collapsed into canonical findings.
@@ -1004,6 +1026,8 @@ Dossier assembly and analysis quality:
 - No source-tier policy is visible in rendered findings.
 - The worker does not yet pivot to proxy analysis after direct-disclosure
   searches fail repeatedly.
+- There is no output-boundary cleanup pass yet for minor generation defects
+  such as truncation or obvious prose errors.
 
 Evidence/retrieval:
 
@@ -1020,8 +1044,11 @@ Memory/dedup:
 
 - Findings extraction exists at the model boundary, but extracted findings are
   not yet stored or retrieved.
-- Deduplication and reference-node behavior are only partially supported by the
-  database/rendering surfaces and are not fully active in orchestration.
+- Deduplication and reference-node behavior are partially active:
+  same-run reference nodes are persisted and rendered, and sibling
+  consolidation now reduces obvious overlap before child creation.
+- Canonical finding IDs, negative-result budgets, and cross-branch duplicate
+  suppression are not implemented.
 - Circularity arbitration is defined in schemas/fake model but not integrated
   into live child-candidate processing.
 - Persistent uncertainties are defined but not integrated.
@@ -1038,16 +1065,19 @@ Product/frontend:
 - Milestone 2: complete, with deep-dive schema evolved beyond the original
   prose-blob design.
 - Milestone 3: mostly complete for scope/search-plan/deep-dive/reflect; branch
-  synthesis remains placeholder for Ollama.
-- Milestone 3B: planned. OpenRouter should be added as the first hosted model
-  provider without changing the search/retrieval evidence path.
+  synthesis remains fallback-only rather than real synthesis.
+- Milestone 3B: mostly complete. OpenRouter is implemented as a hosted provider
+  without changing the search/retrieval evidence path, though native-tool
+  integration remains intentionally disabled.
 - Milestone 4: mostly complete for current recursive worker behavior.
 - Milestone 5: mostly complete for markdown artifacts and live audit progress.
-- Milestone 5B: planned. Deep-run output shows dossier assembly needs real
-  synthesis, canonical findings, duplicate suppression, source-tier weighting,
-  and negative-result/proxy-analysis controls.
+- Milestone 5B: partially complete. Placeholder scaffolding is gone, but deep
+  runs still need real synthesis, canonical findings, duplicate suppression,
+  source-tier weighting, provenance rendering, and negative-result/proxy-
+  analysis controls.
 - Milestone 6: partially complete:
   - Brave discovery exists
+  - Tavily discovery exists
   - source timing metadata exists
   - document retrieval/corpus architecture is not implemented yet
 - Milestones 7-13: mostly not implemented, except for schema/table/rendering
@@ -1064,62 +1094,51 @@ The next meaningful refresh should happen after one of these lands:
 5. Document retrieval/corpus provider design spike.
 6. Sidecar `seed-corpus` prototype.
 7. Evidence sufficiency classifier/gate.
-8. OpenRouter model provider support with auditable metadata persistence.
+8. Output-boundary cleanup for truncation / obvious prose defects.
 
 Current recommended implementation direction:
 
 1. Add source appendix/provenance rendering so dossier claims are inspectable.
-2. Replace placeholder branch synthesis and stop repeated child-summary
-   rendering.
+2. Replace branch-capture fallback with real branch synthesis and stop repeated
+   child-summary rendering.
 3. Add canonical finding IDs plus a negative-result budget so the worker stops
    re-asking exhausted disclosure questions.
 4. Add topology controls so deeper runs can reserve node budget for recursion.
-5. Add OpenRouter as a swappable hosted model provider while keeping evidence
-   collection in our search/retrieval layer.
+5. Add an output cleanup pass for truncation and obvious prose defects without
+   changing substantive capture.
 6. Move from search snippets to document ingestion/retrieval.
 7. Add sidecar corpus seeding for company evidence libraries.
 8. Add an evidence sufficiency decision before deep-dive.
 
 ## Concrete Backlog
 
-This backlog replaces the vague question of "what next?" with the smallest
-sequence of work items that would most improve the current system.
+This backlog is the remaining high-value work from the roadmap. Items already
+landed in the current checkpoint should be treated as done and left here only
+if they still need hardening or follow-through.
 
-### Priority 1: Finish the Vertical Slice Operationally
+### Priority 1: Harden the Vertical Slice Operationally
 
-These items make the existing recursive worker trustworthy and resumable.
+These items improve resilience and control on top of an already-working
+recursive worker.
 
-1. Make per-node failures non-fatal to the whole run.
-   - Persist the failed node state.
-   - Record a `node_failures` row when a node processing step fails.
-   - Continue processing remaining pending or synthesis-ready work.
-   - Add tests proving a failed child does not block sibling completion and
-     does not abort the run.
+1. Add configurable retry/backoff policy per provider and call type.
+   - Distinguish transient provider failures from deterministic validation
+     failures.
+   - Allow different retry policies for Ollama, OpenRouter, and search
+     providers.
+   - Persist retry attempts clearly enough for audit/debugging.
 
-2. Implement startup recovery for transitional node states.
-   - Define which states are transitional:
-     - `investigating`
-     - `reflecting`
-     - `synthesizing`
-   - On startup or resume, reset those nodes to a safe resumable state or mark
-     them failed according to explicit policy.
-   - Add tests simulating interrupted runs.
+2. Persist the fully rendered final prompt string when useful for debugging.
+   - Keep existing structured input payload persistence.
+   - Add optional storage of the final rendered prompt text for targeted call
+     types where prompt debugging matters most.
+   - Avoid exploding storage unnecessarily for every call by default.
 
-3. Add `research resume <run_id>`.
-   - Re-open an existing run.
-   - Perform recovery before resuming work.
-   - Reuse the same orchestration path as fresh runs.
-   - Add CLI tests for resume behavior.
-
-4. Regenerate audit markdown during execution.
-   - Render audit output after each state transition or after each worker step.
-   - Ensure the audit file can be trusted as the live run surface.
-   - Add tests that verify audit output updates across intermediate states.
-
-5. Add an explicit wall-clock stop condition.
-   - Extend worker config with a time budget.
-   - Stop cleanly when the budget is exhausted.
-   - Preserve resumability so the run can continue later.
+3. Add topology controls that make recursion easier to reason about.
+   - Implement `--max-root-nodes` or equivalent.
+   - Make it easier to reserve node budget for deeper recursion rather than
+     spending most of the budget at scope.
+   - Add tests showing depth interacts predictably with node-budget controls.
 
 ### Priority 2: Make Deep Dossiers Readable and Analytical
 
@@ -1167,14 +1186,13 @@ artifacts.
 These items make the live model/search path less of a smoke path and more of a
 usable research path.
 
-11. Add a real external search provider behind `SearchProvider`.
-   - Start with Brave Search as the first web provider.
-   - Keep the existing abstraction for local directory search, but expect it to
-     evolve into a broader evidence-provider boundary.
-   - Fetch and chunk selected pages rather than passing only result snippets.
-   - Record URL, title, source type, retrieval time, and publication/report date
-     where available.
-   - Add freshness controls for time-sensitive investigations.
+11. Upgrade external search from snippet discovery to fetched/chunked evidence.
+   - Keep Brave and Tavily as discovery providers behind `SearchProvider`.
+   - Fetch selected pages/documents rather than passing only result snippets.
+   - Chunk fetched content before deep-dive, reusing a future retrieval layer
+     where possible.
+   - Preserve URL, title, source type, retrieval time, and publication/report
+     date metadata through the fetch/chunk path.
    - Preserve `DirectorySearchProvider` as a deterministic local test source and
      cached-filing path.
 
@@ -1186,18 +1204,14 @@ usable research path.
    - Make stale or undated sources visible in both prompt context and audit
      output.
 
-13. Add OpenRouter as a hosted model provider.
-   - Implement an `OpenRouterModelClient` behind the same research model
-     protocol as Ollama and the fake client.
-   - Use OpenRouter structured JSON output for scope, search-plan, deep-dive,
-     and reflect calls.
-   - Add `research openrouter-run` or a generic `research model-run
-     --provider openrouter` command.
-   - Read `OPENROUTER_API_KEY` from the environment or explicit CLI config.
-   - Persist OpenRouter response metadata in `model_calls`, including token
-     usage, finish reason, resolved model, and reported cost when available.
+13. Harden OpenRouter parity and provider observability.
+   - Keep `OpenRouterModelClient` behind the same research model protocol as
+     Ollama and the fake client.
+   - Continue improving structured-output robustness and metadata persistence.
+   - Ensure provider-specific failures are clearly distinguishable in
+     `model_calls`.
    - Keep OpenRouter-native search/tools disabled by default; use Brave,
-     corpus, filings, or retrieval providers for evidence.
+     Tavily, corpus, filings, or retrieval providers for evidence.
    - If OpenRouter-native tools are later enabled, convert every returned tool
      result into normal source/document provenance before it reaches deep-dive.
 

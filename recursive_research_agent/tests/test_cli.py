@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app import db
-from app.cli import build_parser, main
+from app.cli import _apply_settings_profile, build_parser, main
 from app.fsm import NodeEvent
 from app.llm import FakeModelClient
 from app.orchestrator import start_run
@@ -351,6 +351,7 @@ class CliTests(unittest.TestCase):
             "--source-dir",
             "sources",
         ])
+        _apply_settings_profile(args)
 
         self.assertEqual("Example Co", args.company)
         self.assertEqual("sources", args.source_dir)
@@ -398,7 +399,100 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual("tavily", args.web_search)
         self.assertEqual("tvly-key", args.tavily_api_key)
-        self.assertEqual(30, args.freshness_days)
+
+    def test_ollama_run_profile_applies_settings_defaults(self):
+        settings_file = self.base_path / "research.toml"
+        settings_file.write_text(
+            """
+[profiles.deep]
+web_search = "tavily"
+search_results = 8
+search_queries = 5
+max_depth = 2
+max_total_nodes = 7
+temperature = 0.3
+num_predict = 2048
+""".strip(),
+            encoding="utf-8",
+        )
+        parser = build_parser()
+
+        args = parser.parse_args([
+            "ollama-run",
+            "Example Co",
+            "--profile",
+            "deep",
+            "--settings-file",
+            str(settings_file),
+        ])
+        _apply_settings_profile(args)
+
+        self.assertEqual("tavily", args.web_search)
+        self.assertEqual(8, args.search_results)
+        self.assertEqual(5, args.search_queries)
+        self.assertEqual(2, args.max_depth)
+        self.assertEqual(7, args.max_total_nodes)
+        self.assertEqual(0.3, args.temperature)
+        self.assertEqual(2048, args.num_predict)
+        self.assertEqual("gemma4:latest", args.model)
+
+    def test_openrouter_run_cli_overrides_profile(self):
+        settings_file = self.base_path / "research.toml"
+        settings_file.write_text(
+            """
+[profiles.deep]
+web_search = "brave"
+search_results = 8
+search_queries = 5
+max_depth = 2
+max_total_nodes = 7
+temperature = 0.3
+openrouter_response_format = "none"
+openrouter_max_transient_retries = 6
+openrouter_retry_base_delay_seconds = 2.5
+""".strip(),
+            encoding="utf-8",
+        )
+        parser = build_parser()
+
+        args = parser.parse_args([
+            "openrouter-run",
+            "Example Co",
+            "--model",
+            "openai/gpt-4.1",
+            "--profile",
+            "deep",
+            "--settings-file",
+            str(settings_file),
+            "--search-results",
+            "3",
+            "--openrouter-response-format",
+            "json_object",
+            "--openrouter-max-transient-retries",
+            "1",
+        ])
+        _apply_settings_profile(args)
+
+        self.assertEqual("brave", args.web_search)
+        self.assertEqual(3, args.search_results)
+        self.assertEqual(5, args.search_queries)
+        self.assertEqual("json_object", args.openrouter_response_format)
+        self.assertEqual(1, args.openrouter_max_transient_retries)
+        self.assertEqual(2.5, args.openrouter_retry_base_delay_seconds)
+
+    def test_profile_missing_file_raises_system_exit(self):
+        parser = build_parser()
+        args = parser.parse_args([
+            "ollama-run",
+            "Example Co",
+            "--profile",
+            "deep",
+            "--settings-file",
+            str(self.base_path / "missing.toml"),
+        ])
+
+        with self.assertRaises(SystemExit):
+            _apply_settings_profile(args)
 
     def test_ollama_run_with_brave_requires_api_key(self):
         with patch.dict("os.environ", {}, clear=True):

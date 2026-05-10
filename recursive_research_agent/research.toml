@@ -1,0 +1,46 @@
+[profiles.smoke]
+search_results = 3
+search_queries = 2
+max_depth = 1
+max_total_nodes = 3
+freshness_days = 365
+
+[profiles.ollama_local]
+web_search = "brave"
+search_results = 6
+search_queries = 4
+max_depth = 2
+max_total_nodes = 6
+freshness_days = 730
+temperature = 1.0
+num_predict = 4096
+keep_alive = "5m"
+timeout_seconds = 120.0
+
+[profiles.openrouter_fast]
+web_search = "tavily"
+search_results = 5
+search_queries = 3
+max_depth = 1
+max_total_nodes = 4
+freshness_days = 365
+temperature = 0.7
+num_predict = 3000
+timeout_seconds = 120.0
+openrouter_response_format = "json_object"
+openrouter_max_transient_retries = 3
+openrouter_retry_base_delay_seconds = 1.0
+
+[profiles.openrouter_deep]
+web_search = "tavily"
+search_results = 8
+search_queries = 4
+max_depth = 3
+max_total_nodes = 12
+freshness_days = 730
+temperature = 0.7
+num_predict = 4096
+timeout_seconds = 180.0
+openrouter_response_format = "json_object"
+openrouter_max_transient_retries = 4
+openrouter_retry_base_delay_seconds = 1.5

@@ -868,6 +868,86 @@ class OpenRouterGenerateClientTests(unittest.TestCase):
 
         self.assertEqual("Business overview", output.thread_topic)
 
+    def test_generate_structured_retries_after_openrouter_rate_limit(self):
+        requests = []
+        sleeps = []
+        calls = {"count": 0}
+
+        def fake_post(url, payload, timeout_seconds, headers):
+            requests.append(payload)
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise OpenRouterError(
+                    "OpenRouter returned HTTP 429 from "
+                    "https://openrouter.ai/api/v1/chat/completions: "
+                    '{"error":{"message":"Provider returned error","code":429,'
+                    '"metadata":{"raw":"openrouter/owl-alpha is temporarily '
+                    'rate-limited upstream. Please retry shortly."}}}'
+                )
+            return {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": (
+                                '{"company":"Example Co",'
+                                '"thread_topic":"Business overview",'
+                                '"priority":1}'
+                            )
+                        },
+                    }
+                ],
+            }
+
+        client = OpenRouterGenerateClient(
+            model_name="openai/gpt-4.1",
+            api_key="test-key",
+            max_transient_retries=2,
+            transient_retry_base_delay_seconds=0.5,
+            sleep=sleeps.append,
+            post_json=fake_post,
+        )
+
+        output = client.generate_structured(
+            prompt="Return JSON.",
+            schema=StructuredSmokeOutput,
+        )
+
+        self.assertEqual("Example Co", output.company)
+        self.assertEqual(2, len(requests))
+        self.assertEqual([0.5], sleeps)
+
+    def test_generate_structured_raises_after_exhausting_rate_limit_retries(self):
+        sleeps = []
+        calls = {"count": 0}
+
+        def fake_post(url, payload, timeout_seconds, headers):
+            calls["count"] += 1
+            raise OpenRouterError(
+                "OpenRouter returned HTTP 429 from "
+                "https://openrouter.ai/api/v1/chat/completions: "
+                '{"error":{"message":"Provider returned error","code":429}}'
+            )
+
+        client = OpenRouterGenerateClient(
+            model_name="openai/gpt-4.1",
+            api_key="test-key",
+            max_transient_retries=2,
+            transient_retry_base_delay_seconds=0.25,
+            sleep=sleeps.append,
+            post_json=fake_post,
+        )
+
+        with self.assertRaises(OpenRouterError) as exc:
+            client.generate_structured(
+                prompt="Return JSON.",
+                schema=StructuredSmokeOutput,
+            )
+
+        self.assertIn("HTTP 429", str(exc.exception))
+        self.assertEqual(3, calls["count"])
+        self.assertEqual([0.25, 0.5], sleeps)
+
 
 class OllamaModelClientTests(unittest.TestCase):
     def test_scope_uses_scope_schema_and_prompt(self):
