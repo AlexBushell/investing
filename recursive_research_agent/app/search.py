@@ -22,6 +22,7 @@ from urllib.request import Request, urlopen
 
 JsonObject = dict[str, object]
 JsonRequest = dict[str, object]
+MAX_PROVIDER_TEXT_CHARS = 4000
 
 
 @dataclass(frozen=True)
@@ -169,7 +170,7 @@ class TavilySearchProvider:
         base_url: str = "https://api.tavily.com/search",
         topic: str = "general",
         search_depth: str = "advanced",
-        include_raw_content: str | bool = "text",
+        include_raw_content: str | bool = False,
         freshness_days: int | None = None,
         timeout_seconds: float = 30.0,
         clock: Callable[[], datetime] | None = None,
@@ -466,7 +467,7 @@ def _source_from_brave_result(
     text_parts = [part for part in [description] if part]
     if isinstance(extra_snippets, list):
         text_parts.extend(item for item in extra_snippets if isinstance(item, str))
-    text = "\n".join(text_parts) or title
+    text = _compose_provider_text(text_parts, fallback=title)
     return SourceMaterial(
         title=title,
         url=url,
@@ -503,7 +504,7 @@ def _source_from_tavily_result(
     )
     content = _string_field(result, "content")
     raw_content = _string_field(result, "raw_content")
-    text = "\n".join(part for part in [content, raw_content] if part) or title
+    text = _compose_provider_text([content, raw_content], fallback=title)
     return SourceMaterial(
         title=title,
         url=url,
@@ -522,6 +523,34 @@ def _source_from_tavily_result(
 def _string_field(payload: JsonObject, key: str) -> str | None:
     value = payload.get(key)
     return value if isinstance(value, str) and value.strip() else None
+
+
+def _compose_provider_text(parts: list[str | None], *, fallback: str) -> str:
+    normalized_parts: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        normalized = _normalize_provider_text(part)
+        if normalized:
+            normalized_parts.append(normalized)
+    combined = "\n".join(normalized_parts)
+    if not combined:
+        return _normalize_provider_text(fallback) or fallback
+    if len(combined) <= MAX_PROVIDER_TEXT_CHARS:
+        return combined
+    truncated = combined[:MAX_PROVIDER_TEXT_CHARS].rstrip()
+    return (
+        f"{truncated}\n\n"
+        "[source text truncated before prompting to limit untrusted content size]"
+    )
+
+
+def _normalize_provider_text(text: str) -> str:
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    normalized = re.sub(r"[ \t]{2,}", " ", normalized)
+    return normalized.strip()
 
 
 def _brave_staleness_note(

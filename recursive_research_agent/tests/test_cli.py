@@ -182,6 +182,92 @@ class CliTests(unittest.TestCase):
         self.assertEqual({"company": "Example Co"}, payload["input"])
         self.assertEqual([], payload["output_json"]["root_threads"])
 
+    def test_run_summary_command_prints_run_counts_and_model_variants(self):
+        conn = db.connect(self.db_path)
+        try:
+            db.initialize_database(conn)
+            run = db.create_run(conn, "Example Co")
+            root = db.create_node(
+                conn,
+                run_id=run.run_id,
+                topic="Revenue quality",
+                investigation_brief="Investigate revenue quality.",
+            )
+            child = db.create_node(
+                conn,
+                run_id=run.run_id,
+                parent_id=root.node_id,
+                topic="Customer concentration",
+                investigation_brief="Investigate customer concentration.",
+            )
+            db.apply_node_event(
+                conn,
+                node_id=root.node_id,
+                event=NodeEvent.START_INVESTIGATION,
+            )
+            db.apply_node_event(
+                conn,
+                node_id=root.node_id,
+                event=NodeEvent.DEEP_DIVE_SUCCEEDED,
+            )
+            db.record_node_failure(
+                conn,
+                node_id=child.node_id,
+                error="search failed",
+            )
+            call_id = db.create_model_call(
+                conn,
+                run_id=run.run_id,
+                node_id=root.node_id,
+                call_type="deep_dive",
+                model_name="openai/gpt-4.1",
+                prompt_version="deep-dive-v1",
+                input_payload={"topic": "Revenue quality"},
+            )
+            db.complete_model_call(
+                conn,
+                call_id=call_id,
+                output_payload={"core_question": "Question."},
+            )
+            error_call_id = db.create_model_call(
+                conn,
+                run_id=run.run_id,
+                node_id=child.node_id,
+                call_type="search_plan",
+                model_name="openai/gpt-4.1",
+                prompt_version="search-plan-v1",
+                input_payload={"topic": "Customer concentration"},
+            )
+            db.complete_model_call(
+                conn,
+                call_id=error_call_id,
+                error="validation failed",
+            )
+        finally:
+            conn.close()
+
+        output = self._run_cli("run-summary", run.run_id)
+
+        self.assertIn(f"Run ID: {run.run_id}", output)
+        self.assertIn("Company: Example Co", output)
+        self.assertIn("Status: running", output)
+        self.assertIn("Total Nodes: 2", output)
+        self.assertIn("Model Calls: 2", output)
+        self.assertIn("Model Call Errors: 1", output)
+        self.assertIn("Node Failures Recorded: 1", output)
+        self.assertIn("- pending: 1", output)
+        self.assertIn("- reflecting: 1", output)
+        self.assertIn("- openai/gpt-4.1 | deep-dive-v1", output)
+        self.assertIn("- openai/gpt-4.1 | search-plan-v1", output)
+        self.assertIn("- deep_dive: 1", output)
+        self.assertIn("- search_plan: 1", output)
+        self.assertIn(f"- Audit: outputs\\runs\\{run.run_id}\\audit.md", output)
+        self.assertIn(f"- Dossier: outputs\\runs\\{run.run_id}\\dossier.md", output)
+
+    def test_run_summary_command_missing_run_raises_system_exit(self):
+        with self.assertRaises(SystemExit):
+            self._run_cli("run-summary", "missing-run")
+
     def test_resume_parser_accepts_run_id_and_source_dir(self):
         parser = build_parser()
 

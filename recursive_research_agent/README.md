@@ -233,6 +233,7 @@ Core commands:
 - `research resume`
 - `research render`
 - `research audit`
+- `research run-summary`
 - `research model-calls`
 - `research model-call`
 - `research ollama-run`
@@ -251,6 +252,12 @@ research --help
 ```
 
 ## Inspecting Runs
+
+Print a compact run overview:
+
+```powershell
+.venv\Scripts\python.exe -m app.cli run-summary <run_id>
+```
 
 Summarize model calls for a run:
 

@@ -114,6 +114,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     audit.set_defaults(func=cmd_audit)
 
+    run_summary = subparsers.add_parser(
+        "run-summary",
+        help="Print a compact operational summary for one persisted run.",
+    )
+    run_summary.add_argument("run_id", help="Run id to inspect.")
+    run_summary.set_defaults(func=cmd_run_summary)
+
     model_calls = subparsers.add_parser(
         "model-calls",
         help="Summarize model calls for a run, including Ollama timing metadata.",
@@ -421,6 +428,95 @@ def cmd_audit(args: argparse.Namespace) -> int:
     finally:
         conn.close()
     print(f"Audit: {path}")
+    return 0
+
+
+def cmd_run_summary(args: argparse.Namespace) -> int:
+    conn = db.connect(args.db)
+    try:
+        db.initialize_database(conn)
+        run = _run_summary_row(conn, args.run_id)
+        if run is None:
+            raise SystemExit(f"No run found: {args.run_id}")
+        status_counts = _run_node_status_counts(conn, args.run_id)
+        model_rows = conn.execute(
+            """
+            SELECT DISTINCT model_name, prompt_version
+            FROM model_calls
+            WHERE run_id = ?
+            ORDER BY model_name ASC, prompt_version ASC
+            """,
+            (args.run_id,),
+        ).fetchall()
+        call_type_rows = conn.execute(
+            """
+            SELECT call_type, COUNT(*) AS count
+            FROM model_calls
+            WHERE run_id = ?
+            GROUP BY call_type
+            ORDER BY call_type ASC
+            """,
+            (args.run_id,),
+        ).fetchall()
+        error_count_row = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM model_calls
+            WHERE run_id = ? AND error IS NOT NULL
+            """,
+            (args.run_id,),
+        ).fetchone()
+        node_failure_row = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM node_failures nf
+            JOIN nodes n ON n.node_id = nf.node_id
+            WHERE n.run_id = ?
+            """,
+            (args.run_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    audit_path = _default_audit_path(args.run_id)
+    dossier_path = _default_dossier_path(args.run_id)
+    total_nodes = sum(status_counts.values())
+
+    print(f"Run ID: {run['run_id']}")
+    print(f"Company: {run['company']}")
+    print(f"Status: {run['status']}")
+    print(f"Started: {run['started_at']}")
+    print(f"Completed: {run['completed_at'] or ''}")
+    print(f"Parent Run ID: {run['parent_run_id'] or ''}")
+    print(f"Total Nodes: {total_nodes}")
+    print(f"Model Calls: {sum(int(row['count']) for row in call_type_rows)}")
+    print(f"Model Call Errors: {int(error_count_row['count'])}")
+    print(f"Node Failures Recorded: {int(node_failure_row['count'])}")
+    print()
+    print("Node Status Counts:")
+    if status_counts:
+        for status, count in sorted(status_counts.items()):
+            print(f"- {status}: {count}")
+    else:
+        print("- none")
+    print()
+    print("Model Variants:")
+    if model_rows:
+        for row in model_rows:
+            print(f"- {row['model_name']} | {row['prompt_version']}")
+    else:
+        print("- none")
+    print()
+    print("Model Call Types:")
+    if call_type_rows:
+        for row in call_type_rows:
+            print(f"- {row['call_type']}: {row['count']}")
+    else:
+        print("- none")
+    print()
+    print("Artifacts:")
+    print(f"- Audit: {audit_path}")
+    print(f"- Dossier: {dossier_path}")
     return 0
 
 
@@ -1240,6 +1336,37 @@ def _default_audit_path(run_id: str) -> Path:
 
 def _default_dossier_path(run_id: str) -> Path:
     return DEFAULT_OUTPUTS_DIR / run_id / "dossier.md"
+
+
+def _run_summary_row(
+    conn: sqlite3.Connection,
+    run_id: str,
+) -> sqlite3.Row | None:
+    return conn.execute(
+        """
+        SELECT run_id, company, parent_run_id, started_at, completed_at, status
+        FROM runs
+        WHERE run_id = ?
+        """,
+        (run_id,),
+    ).fetchone()
+
+
+def _run_node_status_counts(
+    conn: sqlite3.Connection,
+    run_id: str,
+) -> dict[str, int]:
+    rows = conn.execute(
+        """
+        SELECT status, COUNT(*) AS count
+        FROM nodes
+        WHERE run_id = ?
+        GROUP BY status
+        ORDER BY status ASC
+        """,
+        (run_id,),
+    ).fetchall()
+    return {row["status"]: int(row["count"]) for row in rows}
 
 
 def _audit_progress_callback(

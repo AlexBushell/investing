@@ -140,6 +140,47 @@ class RenderTests(unittest.TestCase):
             encoding="utf-8"
         ))
 
+    def test_renderers_escape_hostile_markup_in_persisted_text(self):
+        run = start_run(self.conn, company="Example Co", model=FakeModelClient())
+        root = db.root_nodes(self.conn, run.run_id)[0]
+        db.store_deep_dive_output(
+            self.conn,
+            node_id=root.node_id,
+            analysis=(
+                "Finding with <script>alert(1)</script> and "
+                "[click me](https://evil.example)."
+            ),
+            abstract="Abstract.",
+        )
+        db.store_branch_synthesis(
+            self.conn,
+            node_id=root.node_id,
+            branch_synthesis="Summary with ![img](https://evil.example/pixel.png).",
+        )
+        self.conn.execute(
+            """
+            UPDATE nodes
+            SET investigation_brief = ?, triggering_text_span = ?, why_unresolved = ?
+            WHERE node_id = ?
+            """,
+            (
+                "Investigate <b>unsafe</b> [brief](https://evil.example).",
+                "Trigger <img src=x onerror=alert(1)>.",
+                "Reason [link](https://evil.example).",
+                root.node_id,
+            ),
+        )
+
+        audit = render_audit_markdown(self.conn, run.run_id)
+        dossier = render_dossier_markdown(self.conn, run.run_id)
+
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", dossier)
+        self.assertIn("click me (https://evil.example)", dossier)
+        self.assertIn("image: img (https://evil.example/pixel.png)", dossier)
+        self.assertIn("&lt;b&gt;unsafe&lt;/b&gt;", audit)
+        self.assertIn("brief (https://evil.example)", audit)
+        self.assertIn("&lt;img src=x onerror=alert(1)&gt;", audit)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+import re
 import sqlite3
 from pathlib import Path
 
@@ -97,7 +99,10 @@ def _render_audit_node(
     if node.status == NodeState.REJECTED:
         rejection = db.node_rejection(conn, node.node_id)
         if rejection is not None:
-            lines.append(f"{indent}  - Rejection reason: {rejection['reason']}")
+            lines.append(
+                f"{indent}  - Rejection reason: "
+                f"{_safe_markdown_text(rejection['reason'])}"
+            )
             if rejection["duplicated_ancestor_id"]:
                 lines.append(
                     f"{indent}  - Duplicated ancestor: "
@@ -109,16 +114,25 @@ def _render_audit_node(
         if failures:
             latest = failures[-1]
             lines.append(f"{indent}  - Latest failure attempt: `{latest.attempt}`")
-            lines.append(f"{indent}  - Latest failure: {latest.error}")
+            lines.append(
+                f"{indent}  - Latest failure: {_safe_markdown_text(latest.error)}"
+            )
 
     if node.triggering_text_span:
-        lines.append(f"{indent}  - Triggering span: {node.triggering_text_span}")
+        lines.append(
+            f"{indent}  - Triggering span: "
+            f"{_safe_markdown_text(node.triggering_text_span)}"
+        )
     if node.why_unresolved:
-        lines.append(f"{indent}  - Why unresolved: {node.why_unresolved}")
+        lines.append(
+            f"{indent}  - Why unresolved: {_safe_markdown_text(node.why_unresolved)}"
+        )
 
     lines.append(f"{indent}  - Brief:")
     lines.append("")
-    lines.extend(_indented_block(node.investigation_brief, f"{indent}    "))
+    lines.extend(
+        _indented_block(_safe_markdown_text(node.investigation_brief), f"{indent}    ")
+    )
     lines.append("")
 
     for child in db.child_nodes(conn, node.node_id):
@@ -153,15 +167,15 @@ def _render_dossier_node(
         )
         lines.append("")
         for origin in origins:
-            lines.append(f"- {origin}")
+            lines.append(f"- {_safe_markdown_text(origin)}")
         lines.append("")
 
     if node.branch_synthesis:
-        lines.append(node.branch_synthesis)
+        lines.append(_safe_markdown_text(node.branch_synthesis))
         lines.append("")
 
     if node.analysis:
-        lines.append(_reader_analysis(node.analysis))
+        lines.append(_safe_markdown_text(_reader_analysis(node.analysis)))
         lines.append("")
     elif node.status == NodeState.FAILED:
         lines.append(f"[investigation failed: {node.topic}]")
@@ -171,7 +185,7 @@ def _render_dossier_node(
             lines.append("")
             lines.append(f"Latest failure attempt: `{latest.attempt}`")
             lines.append("")
-            lines.append(f"Latest failure: {latest.error}")
+            lines.append(f"Latest failure: {_safe_markdown_text(latest.error)}")
         lines.append("")
     else:
         lines.append(f"_[{node.status.value}: analysis not available yet]_")
@@ -187,6 +201,15 @@ def _indented_block(text: str, prefix: str) -> list[str]:
 
 def _reader_analysis(analysis: str) -> str:
     return analysis.rstrip().removesuffix("END_OF_DEEP_DIVE_ANALYSIS.").rstrip()
+
+
+def _safe_markdown_text(text: str) -> str:
+    sanitized = text.replace("\r\n", "\n").replace("\r", "\n")
+    sanitized = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", sanitized)
+    sanitized = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", r"image: \1 (\2)", sanitized)
+    sanitized = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", sanitized)
+    sanitized = html.escape(sanitized, quote=False)
+    return sanitized
 
 
 def _write_text(output_path: str | Path, text: str) -> Path:

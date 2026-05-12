@@ -18,14 +18,27 @@ class InvalidTransition(ValueError):
 class NodeState(str, Enum):
     """Durable lifecycle states for a research node."""
 
+    # The node has been created but no work has started yet.
     PENDING = "pending"
+    # The worker is actively performing the node's main research/deep-dive step.
     INVESTIGATING = "investigating"
+    # Initial research is done and the system is deciding whether follow-up
+    # child questions are needed.
     REFLECTING = "reflecting"
+    # The node spawned child nodes and is blocked until all of them finish.
     AWAITING_CHILDREN = "awaiting_children"
+    # Child results are available and the node is combining them into its final
+    # answer.
     SYNTHESIZING = "synthesizing"
+    # The node was deduplicated to a canonical node and now tracks that other
+    # node's outcome until it can be marked complete.
     REFERENCE = "reference"
+    # The node was intentionally not pursued, such as when it would duplicate
+    # an ancestor or create a circular line of inquiry.
     REJECTED = "rejected"
+    # The node finished successfully and has no more lifecycle work to do.
     COMPLETE = "complete"
+    # The node hit an unrecoverable error and cannot continue.
     FAILED = "failed"
 
 
@@ -175,4 +188,3 @@ def is_terminal(state: NodeState) -> bool:
     """Return whether a state has no outgoing transitions."""
 
     return state in TERMINAL_STATES
-

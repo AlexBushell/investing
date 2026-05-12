@@ -545,6 +545,154 @@ Suggested sufficiency schema:
 }
 ```
 
+### Milestone 6B: External Call Recording, Inspectable Run Trace, and Replay
+
+The system already persists model-call records and node events, but the next
+observability step should treat every external dependency as a first-class
+recorded artifact. This feature is not only about saving API cost. It should
+make runs inspectable, explainable, and reproducible when orchestration,
+rendering, or prompt-adjacent code changes.
+
+The core design principle should be:
+
+```text
+record first
+  -> inspect traces
+  -> replay exact recorded responses when desired
+  -> add opportunistic cross-run cache reuse later
+```
+
+This is intentionally stronger than LangGraph-style checkpoint replay. The goal
+here is not merely to resume execution from a prior state. The goal is to be
+able to re-run the worker against the same recorded search and model responses
+without re-triggering those external calls.
+
+Target capabilities:
+
+- Produce a chronological run trace that can be inspected after or during a
+  run.
+- Record both request and response artifacts for:
+  - LLM calls
+  - web/search calls
+- Correlate external calls with:
+  - run ID
+  - node ID
+  - lifecycle step / call type
+  - resulting state transitions and persisted outputs
+- Support deterministic replay of a prior run's external responses.
+- Preserve a path for later global cache reuse keyed by normalized request
+  fingerprints, but do not make that the first implementation target.
+
+Suggested architecture:
+
+```text
+worker/orchestrator
+  -> ResearchModelClient wrapper
+  -> SearchProvider wrapper
+  -> trace recorder
+  -> run database
+```
+
+Suggested persistence layers:
+
+- Keep run-local audit tables as the source of truth for what happened during a
+  specific run:
+  - `model_calls`
+  - `node_events`
+  - new `search_calls`
+- Add explicit replay behavior on top of those recorded artifacts.
+- Only later, if needed, add separate cross-run cache tables such as:
+  - `llm_cache`
+  - `search_cache`
+
+Suggested first trace scope:
+
+- For every model call, persist:
+  - call type
+  - model/provider identity
+  - prompt version
+  - normalized input payload
+  - output payload and/or raw output text
+  - provider metadata
+  - timestamps
+  - error state
+- For every search call, persist:
+  - provider identity
+  - company
+  - query
+  - max results
+  - normalized returned `SourceMaterial` list
+  - timestamps
+  - error state
+- For trace rendering, join these with:
+  - node events
+  - node failures
+  - node reference/rejection events
+  - persisted node outputs such as analysis, abstract, and synthesis
+
+Suggested replay modes:
+
+- `record`
+  - always call live providers and persist artifacts
+- `reuse`
+  - prefer previously recorded matching artifacts when available, otherwise
+    call live providers and persist
+- `replay-run`
+  - replay only from artifacts recorded in a specified prior run
+- `replay-strict`
+  - fail if a required recorded artifact is missing rather than calling live
+    providers
+
+Suggested CLI surface:
+
+```text
+research run "Company" --trace-mode record
+research resume <run_id> --trace-mode reuse
+research replay-run <new_company_or_same_scope> --from-run <run_id>
+research run-trace <run_id>
+research export-trace <run_id>
+```
+
+Scope:
+
+- Add `search_calls` table and persistence helpers.
+- Add provider/model wrappers that can:
+  - record external calls
+  - replay recorded responses
+  - surface cache/replay hits in logs and trace output
+- Keep orchestrator logic mostly cache-agnostic by wrapping the boundary
+  interfaces rather than branching replay logic throughout worker code.
+- Add a trace renderer that shows chronological execution across:
+  - node transitions
+  - model calls
+  - search calls
+  - failures
+  - replay hits/misses
+- Add an export format for portable run traces so a recorded run can be
+  inspected or replayed even if the main database evolves.
+- Treat replayability as a compatibility surface:
+  - version request fingerprinting/normalization
+  - version trace-export schema
+  - fail loudly on unsupported replay artifacts rather than silently falling
+    back to live calls
+
+Acceptance criteria:
+
+- A completed run can be rendered as an inspectable chronological trace.
+- Search calls are persisted with enough detail to understand exactly what
+  evidence discovery returned.
+- A second run can replay model and search responses from a prior recorded run
+  without re-contacting those external services.
+- Replay behavior is explicit and testable; the system does not silently mix
+  replayed and live responses unless configured to do so.
+- Trace output makes it possible to answer:
+  - which node triggered this external call
+  - what request was sent
+  - what response came back
+  - what state transition or persisted artifact followed
+- Exported traces are stable enough to be used as regression fixtures for code
+  changes.
+
 Deterministic sufficiency heuristics can run before the model classifier:
 
 - Count distinct documents and publishers.
@@ -710,6 +858,125 @@ Acceptance criteria:
 - Genuinely distinct questions proceed normally.
 - Rejections are visible in the audit view.
 - Rejected nodes do not appear in the full dossier.
+
+## Milestone 8B: Parallel Node Execution with Serialized Admission
+
+If hosted model providers such as OpenRouter are available, the worker should
+eventually be able to investigate multiple nodes in parallel rather than
+processing every branch strictly in sequence. The challenge is not parallel
+model calls by themselves; it is preserving the correctness of within-run dedup
+and circularity controls when many branches are proposing new work at once.
+
+The design goal should be:
+
+```text
+parallel investigation
+  -> batched sibling cleanup
+  -> early reservation of investigation intent
+  -> serialized admission for dedup/circularity/reference decisions
+  -> enqueue canonical child nodes
+```
+
+The key principle is that expensive research work may run in parallel, but node
+admission must remain coordinated.
+
+Why this needs special handling:
+
+- Two workers may independently propose the same child investigation.
+- One worker may propose a child that another branch has already admitted under
+  slightly different wording.
+- A candidate may look valid in isolation but become circular once compared
+  against the full ancestor/canonical set at admission time.
+- Purely serial orchestration gets some protection "for free" because only one
+  node mutates the tree at a time; parallel execution removes that safety.
+
+Suggested architecture:
+
+```text
+parallel worker executes node
+  -> produces proposed child candidates
+  -> candidate batch is sibling-deduplicated locally
+  -> each candidate attempts reservation against a run-level intent registry
+  -> serialized admission transaction decides:
+       - admit as new canonical node
+       - mark as reference to existing canonical node
+       - reject as circular
+       - merge with another concurrent proposal
+```
+
+Suggested persistence additions:
+
+- `candidate_nodes` or `proposed_nodes`
+  - durable queue of child candidates produced by completed investigations
+- `investigation_intents`
+  - run-level registry of normalized/reserved investigation keys
+- extended metadata on `node_references` / `node_rejections`
+  - enough detail to explain whether a proposal lost to dedup, was merged, or
+    was rejected as circular
+
+Suggested control flow:
+
+1. A worker completes deep-dive and reflection for a node.
+2. The worker performs local sibling cleanup on that node's own child
+   candidates before publishing them globally.
+3. Each surviving candidate is normalized into a canonical investigation intent
+   key.
+4. A narrow serialized admission step checks that candidate against:
+   - ancestor nodes
+   - existing canonical nodes
+   - reserved intents from other in-flight workers
+   - recently admitted nodes from the same run
+5. The admission step decides one outcome:
+   - `accepted`: create a real `pending` node
+   - `reference`: point at an existing canonical node
+   - `rejected`: record circularity or redundant-ancestor reason
+   - `merged`: collapse concurrent equivalent proposals into one canonical node
+
+Suggested dedup strategy:
+
+- Stage 1: deterministic normalization
+  - normalize topic/brief casing, whitespace, and boilerplate phrasing
+- Stage 2: cheap similarity prefilter
+  - lexical overlap and later embeddings if needed
+- Stage 3: model arbitration only for ambiguous collisions
+  - dedup against non-ancestor live/canonical work
+  - circularity arbitration against ancestors
+
+Important design constraints:
+
+- Do not let every worker insert child nodes directly into `nodes` without
+  coordination.
+- Keep the serialized section narrow:
+  - reservation lookup
+  - dedup/circularity decision
+  - canonical insert/reference/reject write
+- Allow late merge/reference correction if near-duplicates still slip through.
+- Prefer correctness of the research tree over maximum worker throughput.
+
+Known weaknesses to plan for:
+
+- Admission control can become a bottleneck if many workers finish together.
+- Reservation/admission reduces duplicate node creation but does not eliminate
+  all duplicated upstream effort.
+- Dedup and circularity are fuzzy semantic judgments; deterministic filters
+  must be tuned carefully to avoid both missed collisions and excessive model
+  arbitration.
+- Conceptual overlap across cousin branches may need softer "merge/reference"
+  handling rather than hard ancestor-style rejection.
+
+Acceptance criteria:
+
+- Multiple nodes can be investigated concurrently without corrupting run
+  topology.
+- Equivalent concurrent child proposals do not produce duplicate canonical
+  nodes.
+- Circular child proposals are rejected consistently even under concurrency.
+- A parallel run preserves the same core dedup/reference/rejection invariants
+  as a serial run.
+- Trace/audit artifacts make it visible when a candidate was admitted,
+  referenced, merged, or rejected during serialized admission.
+- The serialized admission path is isolated enough that it can be tested
+  deterministically with synthetic concurrent proposals.
 
 ## Milestone 9: Findings Extraction and SQLite Retrieval
 
