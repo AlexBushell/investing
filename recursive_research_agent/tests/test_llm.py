@@ -1037,8 +1037,31 @@ class OllamaModelClientTests(unittest.TestCase):
             )
         )
 
-        self.assertIn("Child investigation capture:", output)
+        self.assertIn("Completed child investigations indicate", output)
         self.assertIn("Child: Child summary.", output)
+
+    def test_ollama_branch_synthesis_fallback_strips_nested_capture_prefix(self):
+        client = OllamaModelClient()
+
+        output = client.branch_synthesize(
+            BranchSynthesisContext(
+                company="Example Co",
+                topic="Revenue quality",
+                analysis="Analysis.",
+                child_summaries=(
+                    ChildSummary(
+                        topic="Child",
+                        summary=(
+                            "Child investigation capture: - Grandchild: "
+                            "Important takeaway."
+                        ),
+                    ),
+                ),
+            )
+        )
+
+        self.assertIn("Child: Grandchild: Important takeaway.", output)
+        self.assertNotIn("Child investigation capture:", output)
 
     def test_deep_dive_uses_deep_dive_schema_and_prompt(self):
         requests = []

@@ -170,8 +170,9 @@ def _render_dossier_node(
             lines.append(f"- {_safe_markdown_text(origin)}")
         lines.append("")
 
-    if node.branch_synthesis:
-        lines.append(_safe_markdown_text(node.branch_synthesis))
+    branch_synthesis = _renderable_branch_synthesis(node.branch_synthesis)
+    if branch_synthesis:
+        lines.append(_safe_markdown_text(branch_synthesis))
         lines.append("")
 
     if node.analysis:
@@ -201,6 +202,15 @@ def _indented_block(text: str, prefix: str) -> list[str]:
 
 def _reader_analysis(analysis: str) -> str:
     return analysis.rstrip().removesuffix("END_OF_DEEP_DIVE_ANALYSIS.").rstrip()
+
+
+def _renderable_branch_synthesis(branch_synthesis: str | None) -> str:
+    if not branch_synthesis:
+        return ""
+    cleaned = branch_synthesis.strip()
+    if cleaned.startswith("Child investigation capture:"):
+        return ""
+    return cleaned
 
 
 def _safe_markdown_text(text: str) -> str:

@@ -6,11 +6,23 @@ max_total_nodes = 3
 freshness_days = 365
 
 [profiles.ollama_local]
-web_search = "brave"
+web_search = "tavily"
 search_results = 6
 search_queries = 4
 max_depth = 2
 max_total_nodes = 6
+freshness_days = 730
+temperature = 1.0
+num_predict = 4096
+keep_alive = "5m"
+timeout_seconds = 120.0
+
+[profiles.ollama_local_deep]
+web_search = "tavily"
+search_results = 6
+search_queries = 4
+max_depth = 5
+max_total_nodes = 100
 freshness_days = 730
 temperature = 1.0
 num_predict = 4096

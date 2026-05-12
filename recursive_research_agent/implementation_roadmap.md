@@ -4,6 +4,610 @@ This document translates `recursive_research_spec.md` into an implementation pat
 
 The guiding principle is: **make the run database the source of truth, keep model calls stateless, and expose progress through durable artifacts rather than in-memory conversations**.
 
+## Active Build Order
+
+This roadmap is ordered from the next most valuable work toward historical context. Start with the recommended implementation chunk and active backlog. The milestone plan and earlier build sequence are retained later in the document as reference.
+
+## Recommended Next Implementation Chunk
+
+If work resumes immediately, the best next chunk is:
+
+1. source appendix/provenance rendering
+2. real branch synthesis
+3. duplicate child-summary suppression
+4. executive conclusion plus canonical findings
+5. negative-result budget and proxy-analysis pivot
+6. sector-aware scoping and second-pass coverage check
+7. entity disambiguation and primary-document-first routing
+8. split evidence-gap extraction from deep-dive synthesis
+9. tree-global coverage-check stage
+
+That sequence addresses the current failure mode from deep runs: the worker can
+find many related gaps, but the dossier does not yet compress them into a clear
+argument.
+
+## Concrete Backlog
+
+This backlog is the remaining high-value work from the roadmap. Items already
+landed in the current checkpoint should be treated as done and left here only
+if they still need hardening or follow-through.
+
+### Priority 1: Harden the Vertical Slice Operationally
+
+These items improve resilience and control on top of an already-working
+recursive worker.
+
+1. Add configurable retry/backoff policy per provider and call type.
+   - Distinguish transient provider failures from deterministic validation
+     failures.
+   - Allow different retry policies for Ollama, OpenRouter, and search
+     providers.
+   - Persist retry attempts clearly enough for audit/debugging.
+
+2. Persist the fully rendered final prompt string when useful for debugging.
+   - Keep existing structured input payload persistence.
+   - Add optional storage of the final rendered prompt text for targeted call
+     types where prompt debugging matters most.
+   - Avoid exploding storage unnecessarily for every call by default.
+
+3. Add topology controls that make recursion easier to reason about.
+   - Implement `--max-root-nodes` or equivalent.
+   - Make it easier to reserve node budget for deeper recursion rather than
+     spending most of the budget at scope.
+   - Add tests showing depth interacts predictably with node-budget controls.
+
+### Priority 2: Make Deep Dossiers Readable and Analytical
+
+These items convert deeper runs from tree dumps into reader-first research
+artifacts.
+
+6. Replace placeholder branch synthesis.
+   - Add a synthesis prompt and a structured or plain-text contract.
+   - Record synthesis calls in `model_calls` the same way other calls are
+     recorded.
+   - Require parent synthesis to add interpretation across children, not just
+     concatenate summaries.
+   - Add tests proving placeholder text does not appear in completed dossiers
+     when a synthesis-capable model client is used.
+
+7. Suppress recursive child-summary duplication in dossier rendering.
+   - Render each substantive node analysis once.
+   - Let ancestors reference child nodes or canonical finding IDs rather than
+     repeating full child abstracts.
+   - Add tests against a multi-level tree where the same child summary would
+     otherwise appear at several depths.
+
+8. Add an executive conclusion and canonical findings section.
+   - State the lede upfront.
+   - Include confidence and evidence quality.
+   - Include strategic or investment implication.
+   - Assign stable finding IDs within a run and reference them from branch
+     sections.
+
+9. Add negative-result budgets and proxy-analysis pivots.
+   - Stop re-asking the same direct-disclosure question after a configurable
+     number of independent negative confirmations.
+   - Mark the gap as normal industry opacity, company-specific opacity, not
+     retrieved, or likely not publicly knowable.
+   - Spawn or recommend proxy investigations when direct disclosure fails.
+   - Distinguish between:
+     - "the obvious primary document has not been consulted yet"
+     - "the obvious primary document was consulted and does not disclose it"
+     - "this fact category is not normally publicly disclosed"
+   - Route the first case to primary-document retrieval before broader web
+     searching or additional child spawning.
+
+10. Add source-tier weighting and finding filters.
+    - Classify source tiers in prompts/rendering.
+    - Prevent weak sources from carrying high-confidence claims without a clear
+      caveat.
+    - Filter tautological findings out of key findings.
+    - When a claim appears only in low-tier material, require corroboration
+      from higher-tier evidence or downgrade it into an explicit evidence gap.
+
+11. Add deterministic entity disambiguation.
+    - Require each finding or source-backed claim to carry company attribution
+      from the source it came from.
+    - Add a tree-level pass that flags findings whose attributed company does
+      not match the run target or known aliases.
+    - Surface suspected cross-entity contamination prominently in audit/dossier
+      output and keep contaminated findings from becoming load-bearing support
+      until resolved.
+
+12. Add load-bearing claim annotations.
+    - Distinguish claims that carry the conclusion from background context.
+    - Use the annotation in branch synthesis, duplicate suppression, and
+      executive-summary assembly so the dossier emphasizes what actually moves
+      the thesis-critical picture.
+    - Keep the first version simple: boolean or small enum rather than a large
+      ontology.
+
+13. Add second-derivative analytical coverage checks.
+    - Separate topic coverage from analytical coverage.
+    - Detect whether the dossier addresses trajectory, trend, regime change,
+      timing, or other forward-looking dynamics rather than only static current
+      state.
+    - Use deterministic heuristics first, then optionally escalate to a model-
+      backed coverage pass if the dossier appears purely static.
+
+### Priority 3: Complete the Real-Model and Evidence Path
+
+These items make the live model/search path less of a smoke path and more of a
+usable research path.
+
+14. Add primary-document-first routing.
+   - Insert a deterministic routing step between scope/deep-dive needs and
+     search planning that identifies which primary documents should contain the
+     answer first.
+   - Support small per-jurisdiction or per-company-type lookup tables, for
+     example:
+     - UK investment trusts: annual report, half-year report, factsheet, RNS,
+       AIC fact sheet
+     - US listed companies: 10-K, 10-Q, 8-K, DEF 14A, earnings transcript
+   - Prefer fetching the right primary document over broader web search when
+     the fact category should be on file somewhere.
+
+15. Upgrade external search from snippet discovery to fetched/chunked evidence.
+   - Keep Brave and Tavily as discovery providers behind `SearchProvider`.
+   - Fetch selected pages/documents rather than passing only result snippets.
+   - Chunk fetched content before deep-dive, reusing a future retrieval layer
+     where possible.
+   - Preserve URL, title, source type, retrieval time, and publication/report
+     date metadata through the fetch/chunk path.
+   - Preserve `DirectorySearchProvider` as a deterministic local test source and
+     cached-filing path.
+
+16. Decide and document source trace behavior.
+   - Define what search metadata belongs in the database.
+   - Ensure deep-dive prompts receive source material in a stable, debuggable
+     structure.
+   - Add tests for provider failure handling.
+   - Make stale or undated sources visible in both prompt context and audit
+     output.
+
+17. Propagate freshness from sources into findings.
+   - Treat freshness as a first-class finding property, not only a source
+     property.
+   - Flag findings as potentially stale when newer sources for the same company
+     and fact category have been ingested.
+   - Make supersession visible in retrieval and synthesis so old findings do
+     not silently remain load-bearing after newer filings arrive.
+
+18. Harden OpenRouter parity and provider observability.
+   - Keep `OpenRouterModelClient` behind the same research model protocol as
+     Ollama and the fake client.
+   - Continue improving structured-output robustness and metadata persistence.
+   - Ensure provider-specific failures are clearly distinguishable in
+     `model_calls`.
+   - Keep OpenRouter-native search/tools disabled by default; use Brave,
+     Tavily, corpus, filings, or retrieval providers for evidence.
+   - If OpenRouter-native tools are later enabled, convert every returned tool
+     result into normal source/document provenance before it reaches deep-dive.
+
+19. Enforce source-quality policy earlier in retrieval.
+   - Add domain/source-type allowlists and deny/soft-block rules for clearly
+     weak evidence classes such as generic SEO farms and unsupported social
+     posts when stronger public materials should exist.
+   - Preserve low-tier retrieval only when it is explicitly useful as weak
+     context, rumor tracking, or a lead that still requires corroboration.
+   - Make retrieval policy configurable so sector-specific or special-case
+     research can relax it deliberately rather than by accident.
+
+20. Add primary-document coverage gates.
+   - Track whether a run has actually consulted primary materials.
+   - Add deterministic completion or warning thresholds so a dossier built
+     entirely from weak web discovery cannot quietly present as completed
+     forensic research.
+   - Allow explicit exceptions for companies or jurisdictions where primary
+     filings genuinely do not exist or are not retrievable.
+
+### Priority 4: Finish the Unused Persistence Surfaces
+
+These items wire already-designed tables and schemas into real behavior.
+
+21. Implement live writes for `node_rejections`.
+   - Use them when circularity arbitration rejects a candidate.
+   - Render rejection reasons in audit output.
+
+22. Implement live writes for `node_references`.
+    - Mark duplicate investigations as reference nodes.
+    - Increment canonical reference counts.
+    - Surface canonical context in synthesis and rendering.
+
+23. Confirm `node_failures` usage and retry policy.
+    - Decide whether failures are terminal in v1 or retryable.
+    - Record failure attempts consistently.
+    - Expose failure history in CLI or audit output.
+
+### Priority 5: Add Memory Only After the Core Loop Is Stable
+
+These items should come after the run lifecycle is resilient and observable.
+
+24. Implement findings storage in SQLite.
+    - Add `findings` table and FTS5 index.
+    - Persist extracted findings after successful deep-dives.
+    - Treat extraction failures as non-fatal.
+
+25. Add retrieval of prior same-company findings.
+    - Query by company plus structured fields and FTS.
+    - Pass retrieved findings to deep-dive prompts as leads, not facts.
+
+26. Shape findings for downstream thesis-consumption agents.
+    - Decide which fields belong in the research agent versus downstream
+      investment-reasoning layers.
+    - Consider lightweight tagging that makes later extraction of downside
+      floors, asymmetry, invalidators, time-horizon effects, or other thesis
+      primitives cheaper and more reliable.
+    - Keep the research agent evidence-grounded; do not force it to emit full
+      investment conclusions just to support downstream use.
+
+27. Add vector retrieval later, only once enough stored findings exist to
+    judge quality.
+
+### Priority 6: Add Topology Controls and Coverage Control
+
+These items improve recursive quality after the worker is durable.
+
+28. Implement within-run deduplication.
+29. Implement circularity arbitration against ancestors.
+30. Implement persistent uncertainties.
+31. Add sector-aware scoping.
+   - Support a curated per-sector checklist for thesis-critical questions at
+     root scoping time.
+   - Keep the checklist narrow and operational so it improves coverage without
+     turning scope into boilerplate.
+   - Allow a generic fallback for companies with weak or ambiguous sector
+     classification.
+
+32. Add a second-pass scoping coverage check.
+   - After root threads are proposed, ask what trajectory, regime-change,
+     revealed-preference, or second-derivative questions are still missing.
+   - Use it to catch forward-looking gaps that generic scoping tends to miss,
+     especially in sector-specific models such as infrastructure, banks, or
+     software.
+   - Merge the second pass back through the same sibling-consolidation and
+     dedup path as ordinary scope output.
+
+33. Add budget-per-branch controls.
+   - Move beyond a single global node budget and allow branch- or root-level
+     budget allocation.
+   - Seed initial branch budgets from priority, then reallocate unused budget
+     toward higher-yield or higher-priority branches as the run evolves.
+   - Prevent low-value branches from consuming disproportionate node budget
+     while stronger branches are starved.
+
+34. Add a tree-global coverage-check stage near run completion.
+   - Compare the completed investigation tree against an expected sector-aware
+     schema and surface materially missing topics.
+   - Spawn a bounded final-pass set of targeted investigations only when the
+     missing areas would materially change the operating picture.
+   - Use this stage for cross-leaf source/finding deduplication that local
+     nodes cannot reliably perform.
+
+35. Split evidence-gap extraction from deep-dive synthesis.
+   - Let the deep-dive step focus on source assessment, findings, conclusion,
+     and analytical interpretation.
+   - Add a lightweight follow-on pass that extracts concrete unresolved public-
+     evidence gaps from the conclusion and findings.
+   - Use the extracted gaps as the canonical feed for reflection, negative-
+     result budgeting, and coverage checks.
+
+36. Add an explicit evidence-ceiling terminal state.
+   - Distinguish "branch complete because no more children were proposed" from
+     "branch complete because the relevant primary evidence ceiling has been
+     reached."
+   - Mark branches where the obvious primary materials were consulted and the
+     question still cannot be answered from public evidence.
+   - Integrate this with persistent uncertainties without limiting it only to
+     separately spawned uncertainty objects.
+
+### Priority 7: Prepare the Frontend Boundary
+
+37. Add model-per-call-type strategy.
+    - Allow different providers or models for different call types, for
+      example local models for bulk deep-dive work and hosted models for
+      reflect/consolidate/synthesis.
+    - Keep the dispatch configuration explicit and auditable in `model_calls`
+      and run config.
+    - Use the same mechanism to support tests, cheap exploratory runs, and
+      higher-quality production runs.
+
+38. Enforce prompt/schema versioning discipline.
+    - Store deterministic hashes of prompt text and schema definitions
+      alongside human-readable version labels.
+    - Fail loudly or warn when a prompt/schema changes without a version bump.
+    - Use the hashes in regression fixtures so prompt drift cannot hide inside
+      unchanged version labels.
+
+39. Add a backend control surface for:
+    - create run
+    - resume run
+    - pause or stop run
+    - list runs
+    - inspect node tree
+    - read audit and dossier artifacts
+
+40. Keep the CLI as a first-class client of the same storage-backed backend.
+
+### Priority 8: Strengthen Observability and Evaluation
+
+41. Add cost-per-finding and cost-per-load-bearing-claim metrics.
+    - Roll token/cost data from `model_calls` up to findings and major
+      conclusions.
+    - Compare prompt/model variants on output economics rather than only total
+      run cost.
+    - Surface these metrics in regression and model-comparison workflows.
+
+42. Add source-concentration and surfaced-bias checks.
+    - Measure whether a run is overly anchored on one author, publication, or
+      narrow source cluster even when those sources are not obviously low-tier.
+    - Start with simple concentration metrics, then add richer diagnostics only
+      if they prove useful.
+    - Surface concentration warnings in audit/regression output so a dossier
+      captured by one critic or one blog is easy to spot.
+
+## Current Status Checkpoint
+
+Last refreshed: 2026-05-10.
+
+Use this section as the living checkpoint when returning to the project. Update
+the date, the tested command set, and the "next checkpoint" notes whenever a
+meaningful capability lands.
+
+### Working Capabilities
+
+Core backend:
+
+- Python package, `pyproject.toml`, CLI entry points, and automated test suite.
+- SQLite-backed run ledger for:
+  - runs
+  - nodes
+  - node events
+  - model calls
+  - node failures
+  - node rejections
+  - node references
+- FSM-based node lifecycle with persisted transitions.
+- Startup recovery for transitional node states before resume/continuation.
+- First-class `research resume <run_id>` path.
+- Explicit wall-clock stop budget for resumable partial runs.
+- Per-node failure isolation:
+  - node failures are recorded
+  - failed children do not block sibling completion
+  - failed children are visible in audit/dossier output
+- Continuous audit regeneration during run progress.
+- Dossier rendering for completed/failed/reference branches.
+
+Model boundary:
+
+- Deterministic `FakeModelClient` for offline tests.
+- Ollama-backed structured calls for:
+  - scope
+  - search planning
+  - deep dive
+  - reflection
+- OpenRouter-backed structured calls for:
+  - scope
+  - search planning
+  - deep dive
+  - reflection
+- Ollama keep-alive defaults to `5m`.
+- Provider-neutral model boundary across:
+  - `FakeModelClient`
+  - `OllamaModelClient`
+  - `OpenRouterModelClient`
+- Structured-output hardening for hosted models includes:
+  - retry on invalid JSON / schema-shape failures
+  - parsing of fenced JSON blocks
+  - parsing of JSON embedded in surrounding prose
+- Sibling-consolidation structured output is implemented at the model boundary
+  and consumed by orchestration before child-node creation.
+- Model-call instrumentation includes:
+  - timestamped CLI progress logs
+  - Ollama load/total/eval metadata when available
+  - OpenRouter provider/model/finish/token/cost metadata when available
+  - `research model-calls <run_id>` summary
+  - `research model-call <call_id>` inspection
+  - `--raw` model-call output for prompt debugging
+- Failed structured model calls persist raw response text when available.
+
+Prompt/schema state:
+
+- Scope output is structured.
+- Search-plan output is structured and asks for several narrow source-seeking
+  queries rather than one broad copied brief.
+- Deep-dive output now uses structured JSON sections instead of one large
+  freeform `analysis` blob:
+  - `core_question`
+  - `source_assessment`
+  - `key_findings`
+  - `evidence_gaps`
+  - `conclusion`
+  - `abstract`
+  - `contradictions`
+  - `discovered_threads`
+- The rendered node analysis is derived from those fields.
+- Completion sentinels are no longer part of the deep-dive model contract.
+- Reflection still operates over the rendered analysis text.
+
+Search and evidence:
+
+- `DirectorySearchProvider` supports deterministic local/source-fixture runs.
+- `BraveSearchProvider` supports real web discovery.
+- `TavilySearchProvider` supports real web discovery through an alternative
+  provider path.
+- `CompositeSearchProvider` can combine configured sources.
+- Search planning is model-guided but bounded by CLI/config limits.
+- Web source material carries URL, title, source type, retrieval time,
+  publication/page-age metadata where available, and staleness notes.
+- Brave query length is guarded before API calls.
+- Search progress is logged at a high level during real-model runs.
+
+CLI surface:
+
+- `research init-db`
+- `research run` / `research fake-run`
+- `research resume`
+- `research render`
+- `research audit`
+- `research model-calls`
+- `research model-call`
+- Ollama smoke/scope/deep-dive/reflect commands
+- `research ollama-run` with:
+  - local source directory
+  - Brave web search
+  - Tavily web search
+  - freshness window
+  - search result limit
+  - planned search query limit
+  - max depth
+  - max total nodes
+  - timeout and keep-alive controls
+- `research openrouter-run` with the same search/orchestration path and
+  provider-specific API key/model controls
+
+### Recent Real-Model Observations
+
+- Brave-backed Microsoft runs complete successfully with Gemma/Ollama.
+- Structured deep-dive sections substantially improved output stability:
+  - no sentinel artifacts
+  - no observed dangling future-plan endings in the latest run
+  - cleaner dossier sections for source assessment, findings, gaps, and
+    conclusion
+- Branch-synthesis placeholder text no longer appears in completed dossiers.
+  Real model clients now fall back to a deterministic branch-capture block
+  rather than emitting literal placeholder scaffolding.
+- Evidence quality is now the main bottleneck. Search snippets and generic web
+  pages are not a strong enough evidence substrate for deeper reports.
+- `--search-results 3` is useful for smoke tests but often too sparse for real
+  analysis. `6` to `8` is a better starting range.
+- Recursion depth only matters when `--max-total-nodes` leaves room beyond the
+  root nodes created by scope. A future `--max-root-nodes` control would make
+  this easier to manage.
+- A much deeper Microsoft run showed that deeper recursion currently creates
+  too much duplicated structure:
+  - parent sections still over-preserve nested child capture
+  - child summaries are repeated at multiple ancestor levels
+  - many branches reconfirm the same "not disclosed" result
+  - the most important conclusion is buried rather than stated upfront
+  - weak source tiers can appear beside primary sources without enough
+    weighting distinction
+- New Greencoat runs confirm the same pattern: output cleanliness is better,
+  but dossier quality is now primarily limited by duplicate suppression,
+  provenance visibility, and the absence of canonical findings / negative-result
+  controls.
+
+### Known Gaps
+
+Execution/model:
+
+- Branch synthesis is still a deterministic fallback rather than a true
+  parent-level interpretive synthesis call.
+- Model-native tools, including OpenRouter web/search tools, are not integrated
+  and should remain outside the default evidence path until their outputs can
+  be normalized into auditable `SourceMaterial` records.
+- Retry policy is still simple. Failed nodes are isolated, but there is no
+  configurable retry/backoff policy per provider or call type.
+- Model-call records capture call input payloads, but not always the fully
+  rendered final prompt string as sent to Ollama.
+
+Dossier assembly and analysis quality:
+
+- Completed dossiers still render the tree too literally.
+- Parent branch sections still do not provide real cross-child interpretation;
+  they use branch-capture fallback text instead.
+- Repeated child summaries are duplicated across ancestor levels.
+- There is no executive conclusion or reader-first headline section.
+- Repeated negative findings are not collapsed into canonical findings.
+- The system does not yet distinguish "not disclosed in retrieved evidence"
+  from "likely not publicly knowable" or "normal industry opacity."
+- No source-tier policy is visible in rendered findings.
+- The worker does not yet pivot to proxy analysis after direct-disclosure
+  searches fail repeatedly.
+- There is no output-boundary cleanup pass yet for minor generation defects
+  such as truncation or obvious prose errors.
+
+Evidence/retrieval:
+
+- Search results are still treated as immediate `SourceMaterial`; real document
+  fetching/extraction/chunking is not implemented.
+- No durable document corpus exists yet.
+- No retrieval provider exists over a reusable document/chunk index.
+- No explicit evidence sufficiency gate exists before deep dive.
+- Dossier output cites `Source 1`, `Source 2`, etc., but does not yet render a
+  per-node source appendix showing title, URL, date, retrieval time, and source
+  date basis.
+
+Memory/dedup:
+
+- Findings extraction exists at the model boundary, but extracted findings are
+  not yet stored or retrieved.
+- Deduplication and reference-node behavior are partially active:
+  same-run reference nodes are persisted and rendered, and sibling
+  consolidation now reduces obvious overlap before child creation.
+- Canonical finding IDs, negative-result budgets, and cross-branch duplicate
+  suppression are not implemented.
+- Circularity arbitration is defined in schemas/fake model but not integrated
+  into live child-candidate processing.
+- Persistent uncertainties are defined but not integrated.
+
+Product/frontend:
+
+- No Flutter-facing API/control surface yet.
+- CLI remains the only active control interface.
+
+### Practical Milestone Assessment
+
+- Milestone 0: complete.
+- Milestone 1: mostly complete.
+- Milestone 2: complete, with deep-dive schema evolved beyond the original
+  prose-blob design.
+- Milestone 3: mostly complete for scope/search-plan/deep-dive/reflect; branch
+  synthesis remains fallback-only rather than real synthesis.
+- Milestone 3B: mostly complete. OpenRouter is implemented as a hosted provider
+  without changing the search/retrieval evidence path, though native-tool
+  integration remains intentionally disabled.
+- Milestone 4: mostly complete for current recursive worker behavior.
+- Milestone 5: mostly complete for markdown artifacts and live audit progress.
+- Milestone 5B: partially complete. Placeholder scaffolding is gone, but deep
+  runs still need real synthesis, canonical findings, duplicate suppression,
+  source-tier weighting, provenance rendering, and negative-result/proxy-
+  analysis controls.
+- Milestone 6: partially complete:
+  - Brave discovery exists
+  - Tavily discovery exists
+  - source timing metadata exists
+  - document retrieval/corpus architecture is not implemented yet
+- Milestones 7-13: mostly not implemented, except for schema/table/rendering
+  groundwork in a few areas.
+
+### Next Checkpoint Goals
+
+The next meaningful refresh should happen after one of these lands:
+
+1. Source appendix rendering for dossier/audit.
+2. Real branch synthesis and duplicate child-summary suppression.
+3. Canonical finding IDs and negative-result budget.
+4. `--max-root-nodes` or equivalent topology control.
+5. Document retrieval/corpus provider design spike.
+6. Sidecar `seed-corpus` prototype.
+7. Evidence sufficiency classifier/gate.
+8. Output-boundary cleanup for truncation / obvious prose defects.
+
+Current recommended implementation direction:
+
+1. Add source appendix/provenance rendering so dossier claims are inspectable.
+2. Replace branch-capture fallback with real branch synthesis and stop repeated
+   child-summary rendering.
+3. Add canonical finding IDs plus a negative-result budget so the worker stops
+   re-asking exhausted disclosure questions.
+4. Add topology controls so deeper runs can reserve node budget for recursion.
+5. Add an output cleanup pass for truncation and obvious prose defects without
+   changing substantive capture.
+6. Move from search snippets to document ingestion/retrieval.
+7. Add sidecar corpus seeding for company evidence libraries.
+8. Add an evidence sufficiency decision before deep-dive.
+
 ## Architecture Target
 
 The first production-shaped backend should be a Python package with a CLI entry point and a storage boundary that a future Flutter frontend can observe and control.
@@ -43,6 +647,34 @@ Key boundaries:
 - `render.py` owns dossier and audit markdown generation.
 - `findings_store.py` owns persistent extracted findings and retrieval.
 - `dedup.py` owns within-run topical deduplication and circularity arbitration.
+
+## Suggested First Deliverable
+
+The first useful deliverable is not the complete v1 spec. It is:
+
+```text
+CLI command:
+  research run "Example Company" --fake-model
+
+Outputs:
+  data/research.sqlite
+  outputs/runs/<run_id>/audit.md
+  outputs/runs/<run_id>/dossier.md
+```
+
+This proves the core contract:
+
+- The tree lives in SQLite.
+- The worker resumes from persisted state.
+- Model calls are stateless.
+- The recursive lifecycle terminates.
+- The audit and dossier surfaces exist.
+
+Once that is true, real search, real Ollama calls, deduplication, findings memory, and Flutter control can be layered in without changing the center of the system.
+
+## Milestone Archive
+
+The sections below preserve the original milestone-by-milestone build plan and acceptance criteria for historical reference.
 
 ## Milestone 0: Project Skeleton
 
@@ -1091,461 +1723,3 @@ Acceptance criteria:
 - Early runs can be spot-checked for dedup and circularity errors.
 - The system can answer: "What changed because of this prompt edit?"
 
-## Suggested First Deliverable
-
-The first useful deliverable is not the complete v1 spec. It is:
-
-```text
-CLI command:
-  research run "Example Company" --fake-model
-
-Outputs:
-  data/research.sqlite
-  outputs/runs/<run_id>/audit.md
-  outputs/runs/<run_id>/dossier.md
-```
-
-This proves the core contract:
-
-- The tree lives in SQLite.
-- The worker resumes from persisted state.
-- Model calls are stateless.
-- The recursive lifecycle terminates.
-- The audit and dossier surfaces exist.
-
-Once that is true, real search, real Ollama calls, deduplication, findings memory, and Flutter control can be layered in without changing the center of the system.
-
-## Current Status Checkpoint
-
-Last refreshed: 2026-05-10.
-
-Use this section as the living checkpoint when returning to the project. Update
-the date, the tested command set, and the "next checkpoint" notes whenever a
-meaningful capability lands.
-
-### Working Capabilities
-
-Core backend:
-
-- Python package, `pyproject.toml`, CLI entry points, and automated test suite.
-- SQLite-backed run ledger for:
-  - runs
-  - nodes
-  - node events
-  - model calls
-  - node failures
-  - node rejections
-  - node references
-- FSM-based node lifecycle with persisted transitions.
-- Startup recovery for transitional node states before resume/continuation.
-- First-class `research resume <run_id>` path.
-- Explicit wall-clock stop budget for resumable partial runs.
-- Per-node failure isolation:
-  - node failures are recorded
-  - failed children do not block sibling completion
-  - failed children are visible in audit/dossier output
-- Continuous audit regeneration during run progress.
-- Dossier rendering for completed/failed/reference branches.
-
-Model boundary:
-
-- Deterministic `FakeModelClient` for offline tests.
-- Ollama-backed structured calls for:
-  - scope
-  - search planning
-  - deep dive
-  - reflection
-- OpenRouter-backed structured calls for:
-  - scope
-  - search planning
-  - deep dive
-  - reflection
-- Ollama keep-alive defaults to `5m`.
-- Provider-neutral model boundary across:
-  - `FakeModelClient`
-  - `OllamaModelClient`
-  - `OpenRouterModelClient`
-- Structured-output hardening for hosted models includes:
-  - retry on invalid JSON / schema-shape failures
-  - parsing of fenced JSON blocks
-  - parsing of JSON embedded in surrounding prose
-- Sibling-consolidation structured output is implemented at the model boundary
-  and consumed by orchestration before child-node creation.
-- Model-call instrumentation includes:
-  - timestamped CLI progress logs
-  - Ollama load/total/eval metadata when available
-  - OpenRouter provider/model/finish/token/cost metadata when available
-  - `research model-calls <run_id>` summary
-  - `research model-call <call_id>` inspection
-  - `--raw` model-call output for prompt debugging
-- Failed structured model calls persist raw response text when available.
-
-Prompt/schema state:
-
-- Scope output is structured.
-- Search-plan output is structured and asks for several narrow source-seeking
-  queries rather than one broad copied brief.
-- Deep-dive output now uses structured JSON sections instead of one large
-  freeform `analysis` blob:
-  - `core_question`
-  - `source_assessment`
-  - `key_findings`
-  - `evidence_gaps`
-  - `conclusion`
-  - `abstract`
-  - `contradictions`
-  - `discovered_threads`
-- The rendered node analysis is derived from those fields.
-- Completion sentinels are no longer part of the deep-dive model contract.
-- Reflection still operates over the rendered analysis text.
-
-Search and evidence:
-
-- `DirectorySearchProvider` supports deterministic local/source-fixture runs.
-- `BraveSearchProvider` supports real web discovery.
-- `TavilySearchProvider` supports real web discovery through an alternative
-  provider path.
-- `CompositeSearchProvider` can combine configured sources.
-- Search planning is model-guided but bounded by CLI/config limits.
-- Web source material carries URL, title, source type, retrieval time,
-  publication/page-age metadata where available, and staleness notes.
-- Brave query length is guarded before API calls.
-- Search progress is logged at a high level during real-model runs.
-
-CLI surface:
-
-- `research init-db`
-- `research run` / `research fake-run`
-- `research resume`
-- `research render`
-- `research audit`
-- `research model-calls`
-- `research model-call`
-- Ollama smoke/scope/deep-dive/reflect commands
-- `research ollama-run` with:
-  - local source directory
-  - Brave web search
-  - Tavily web search
-  - freshness window
-  - search result limit
-  - planned search query limit
-  - max depth
-  - max total nodes
-  - timeout and keep-alive controls
-- `research openrouter-run` with the same search/orchestration path and
-  provider-specific API key/model controls
-
-### Recent Real-Model Observations
-
-- Brave-backed Microsoft runs complete successfully with Gemma/Ollama.
-- Structured deep-dive sections substantially improved output stability:
-  - no sentinel artifacts
-  - no observed dangling future-plan endings in the latest run
-  - cleaner dossier sections for source assessment, findings, gaps, and
-    conclusion
-- Branch-synthesis placeholder text no longer appears in completed dossiers.
-  Real model clients now fall back to a deterministic branch-capture block
-  rather than emitting literal placeholder scaffolding.
-- Evidence quality is now the main bottleneck. Search snippets and generic web
-  pages are not a strong enough evidence substrate for deeper reports.
-- `--search-results 3` is useful for smoke tests but often too sparse for real
-  analysis. `6` to `8` is a better starting range.
-- Recursion depth only matters when `--max-total-nodes` leaves room beyond the
-  root nodes created by scope. A future `--max-root-nodes` control would make
-  this easier to manage.
-- A much deeper Microsoft run showed that deeper recursion currently creates
-  too much duplicated structure:
-  - parent sections still over-preserve nested child capture
-  - child summaries are repeated at multiple ancestor levels
-  - many branches reconfirm the same "not disclosed" result
-  - the most important conclusion is buried rather than stated upfront
-  - weak source tiers can appear beside primary sources without enough
-    weighting distinction
-- New Greencoat runs confirm the same pattern: output cleanliness is better,
-  but dossier quality is now primarily limited by duplicate suppression,
-  provenance visibility, and the absence of canonical findings / negative-result
-  controls.
-
-### Known Gaps
-
-Execution/model:
-
-- Branch synthesis is still a deterministic fallback rather than a true
-  parent-level interpretive synthesis call.
-- Model-native tools, including OpenRouter web/search tools, are not integrated
-  and should remain outside the default evidence path until their outputs can
-  be normalized into auditable `SourceMaterial` records.
-- Retry policy is still simple. Failed nodes are isolated, but there is no
-  configurable retry/backoff policy per provider or call type.
-- Model-call records capture call input payloads, but not always the fully
-  rendered final prompt string as sent to Ollama.
-
-Dossier assembly and analysis quality:
-
-- Completed dossiers still render the tree too literally.
-- Parent branch sections still do not provide real cross-child interpretation;
-  they use branch-capture fallback text instead.
-- Repeated child summaries are duplicated across ancestor levels.
-- There is no executive conclusion or reader-first headline section.
-- Repeated negative findings are not collapsed into canonical findings.
-- The system does not yet distinguish "not disclosed in retrieved evidence"
-  from "likely not publicly knowable" or "normal industry opacity."
-- No source-tier policy is visible in rendered findings.
-- The worker does not yet pivot to proxy analysis after direct-disclosure
-  searches fail repeatedly.
-- There is no output-boundary cleanup pass yet for minor generation defects
-  such as truncation or obvious prose errors.
-
-Evidence/retrieval:
-
-- Search results are still treated as immediate `SourceMaterial`; real document
-  fetching/extraction/chunking is not implemented.
-- No durable document corpus exists yet.
-- No retrieval provider exists over a reusable document/chunk index.
-- No explicit evidence sufficiency gate exists before deep dive.
-- Dossier output cites `Source 1`, `Source 2`, etc., but does not yet render a
-  per-node source appendix showing title, URL, date, retrieval time, and source
-  date basis.
-
-Memory/dedup:
-
-- Findings extraction exists at the model boundary, but extracted findings are
-  not yet stored or retrieved.
-- Deduplication and reference-node behavior are partially active:
-  same-run reference nodes are persisted and rendered, and sibling
-  consolidation now reduces obvious overlap before child creation.
-- Canonical finding IDs, negative-result budgets, and cross-branch duplicate
-  suppression are not implemented.
-- Circularity arbitration is defined in schemas/fake model but not integrated
-  into live child-candidate processing.
-- Persistent uncertainties are defined but not integrated.
-
-Product/frontend:
-
-- No Flutter-facing API/control surface yet.
-- CLI remains the only active control interface.
-
-### Practical Milestone Assessment
-
-- Milestone 0: complete.
-- Milestone 1: mostly complete.
-- Milestone 2: complete, with deep-dive schema evolved beyond the original
-  prose-blob design.
-- Milestone 3: mostly complete for scope/search-plan/deep-dive/reflect; branch
-  synthesis remains fallback-only rather than real synthesis.
-- Milestone 3B: mostly complete. OpenRouter is implemented as a hosted provider
-  without changing the search/retrieval evidence path, though native-tool
-  integration remains intentionally disabled.
-- Milestone 4: mostly complete for current recursive worker behavior.
-- Milestone 5: mostly complete for markdown artifacts and live audit progress.
-- Milestone 5B: partially complete. Placeholder scaffolding is gone, but deep
-  runs still need real synthesis, canonical findings, duplicate suppression,
-  source-tier weighting, provenance rendering, and negative-result/proxy-
-  analysis controls.
-- Milestone 6: partially complete:
-  - Brave discovery exists
-  - Tavily discovery exists
-  - source timing metadata exists
-  - document retrieval/corpus architecture is not implemented yet
-- Milestones 7-13: mostly not implemented, except for schema/table/rendering
-  groundwork in a few areas.
-
-### Next Checkpoint Goals
-
-The next meaningful refresh should happen after one of these lands:
-
-1. Source appendix rendering for dossier/audit.
-2. Real branch synthesis and duplicate child-summary suppression.
-3. Canonical finding IDs and negative-result budget.
-4. `--max-root-nodes` or equivalent topology control.
-5. Document retrieval/corpus provider design spike.
-6. Sidecar `seed-corpus` prototype.
-7. Evidence sufficiency classifier/gate.
-8. Output-boundary cleanup for truncation / obvious prose defects.
-
-Current recommended implementation direction:
-
-1. Add source appendix/provenance rendering so dossier claims are inspectable.
-2. Replace branch-capture fallback with real branch synthesis and stop repeated
-   child-summary rendering.
-3. Add canonical finding IDs plus a negative-result budget so the worker stops
-   re-asking exhausted disclosure questions.
-4. Add topology controls so deeper runs can reserve node budget for recursion.
-5. Add an output cleanup pass for truncation and obvious prose defects without
-   changing substantive capture.
-6. Move from search snippets to document ingestion/retrieval.
-7. Add sidecar corpus seeding for company evidence libraries.
-8. Add an evidence sufficiency decision before deep-dive.
-
-## Concrete Backlog
-
-This backlog is the remaining high-value work from the roadmap. Items already
-landed in the current checkpoint should be treated as done and left here only
-if they still need hardening or follow-through.
-
-### Priority 1: Harden the Vertical Slice Operationally
-
-These items improve resilience and control on top of an already-working
-recursive worker.
-
-1. Add configurable retry/backoff policy per provider and call type.
-   - Distinguish transient provider failures from deterministic validation
-     failures.
-   - Allow different retry policies for Ollama, OpenRouter, and search
-     providers.
-   - Persist retry attempts clearly enough for audit/debugging.
-
-2. Persist the fully rendered final prompt string when useful for debugging.
-   - Keep existing structured input payload persistence.
-   - Add optional storage of the final rendered prompt text for targeted call
-     types where prompt debugging matters most.
-   - Avoid exploding storage unnecessarily for every call by default.
-
-3. Add topology controls that make recursion easier to reason about.
-   - Implement `--max-root-nodes` or equivalent.
-   - Make it easier to reserve node budget for deeper recursion rather than
-     spending most of the budget at scope.
-   - Add tests showing depth interacts predictably with node-budget controls.
-
-### Priority 2: Make Deep Dossiers Readable and Analytical
-
-These items convert deeper runs from tree dumps into reader-first research
-artifacts.
-
-6. Replace placeholder branch synthesis.
-   - Add a synthesis prompt and a structured or plain-text contract.
-   - Record synthesis calls in `model_calls` the same way other calls are
-     recorded.
-   - Require parent synthesis to add interpretation across children, not just
-     concatenate summaries.
-   - Add tests proving placeholder text does not appear in completed dossiers
-     when a synthesis-capable model client is used.
-
-7. Suppress recursive child-summary duplication in dossier rendering.
-   - Render each substantive node analysis once.
-   - Let ancestors reference child nodes or canonical finding IDs rather than
-     repeating full child abstracts.
-   - Add tests against a multi-level tree where the same child summary would
-     otherwise appear at several depths.
-
-8. Add an executive conclusion and canonical findings section.
-   - State the lede upfront.
-   - Include confidence and evidence quality.
-   - Include strategic or investment implication.
-   - Assign stable finding IDs within a run and reference them from branch
-     sections.
-
-9. Add negative-result budgets and proxy-analysis pivots.
-   - Stop re-asking the same direct-disclosure question after a configurable
-     number of independent negative confirmations.
-   - Mark the gap as normal industry opacity, company-specific opacity, not
-     retrieved, or likely not publicly knowable.
-   - Spawn or recommend proxy investigations when direct disclosure fails.
-
-10. Add source-tier weighting and finding filters.
-    - Classify source tiers in prompts/rendering.
-    - Prevent weak sources from carrying high-confidence claims without a clear
-      caveat.
-    - Filter tautological findings out of key findings.
-
-### Priority 3: Complete the Real-Model and Evidence Path
-
-These items make the live model/search path less of a smoke path and more of a
-usable research path.
-
-11. Upgrade external search from snippet discovery to fetched/chunked evidence.
-   - Keep Brave and Tavily as discovery providers behind `SearchProvider`.
-   - Fetch selected pages/documents rather than passing only result snippets.
-   - Chunk fetched content before deep-dive, reusing a future retrieval layer
-     where possible.
-   - Preserve URL, title, source type, retrieval time, and publication/report
-     date metadata through the fetch/chunk path.
-   - Preserve `DirectorySearchProvider` as a deterministic local test source and
-     cached-filing path.
-
-12. Decide and document source trace behavior.
-   - Define what search metadata belongs in the database.
-   - Ensure deep-dive prompts receive source material in a stable, debuggable
-     structure.
-   - Add tests for provider failure handling.
-   - Make stale or undated sources visible in both prompt context and audit
-     output.
-
-13. Harden OpenRouter parity and provider observability.
-   - Keep `OpenRouterModelClient` behind the same research model protocol as
-     Ollama and the fake client.
-   - Continue improving structured-output robustness and metadata persistence.
-   - Ensure provider-specific failures are clearly distinguishable in
-     `model_calls`.
-   - Keep OpenRouter-native search/tools disabled by default; use Brave,
-     Tavily, corpus, filings, or retrieval providers for evidence.
-   - If OpenRouter-native tools are later enabled, convert every returned tool
-     result into normal source/document provenance before it reaches deep-dive.
-
-### Priority 4: Finish the Unused Persistence Surfaces
-
-These items wire already-designed tables and schemas into real behavior.
-
-14. Implement live writes for `node_rejections`.
-   - Use them when circularity arbitration rejects a candidate.
-   - Render rejection reasons in audit output.
-
-15. Implement live writes for `node_references`.
-    - Mark duplicate investigations as reference nodes.
-    - Increment canonical reference counts.
-    - Surface canonical context in synthesis and rendering.
-
-16. Confirm `node_failures` usage and retry policy.
-    - Decide whether failures are terminal in v1 or retryable.
-    - Record failure attempts consistently.
-    - Expose failure history in CLI or audit output.
-
-### Priority 5: Add Memory Only After the Core Loop Is Stable
-
-These items should come after the run lifecycle is resilient and observable.
-
-17. Implement findings storage in SQLite.
-    - Add `findings` table and FTS5 index.
-    - Persist extracted findings after successful deep-dives.
-    - Treat extraction failures as non-fatal.
-
-18. Add retrieval of prior same-company findings.
-    - Query by company plus structured fields and FTS.
-    - Pass retrieved findings to deep-dive prompts as leads, not facts.
-
-19. Add vector retrieval later, only once enough stored findings exist to
-    judge quality.
-
-### Priority 6: Add Topology Controls
-
-These items improve recursive quality after the worker is durable.
-
-20. Implement within-run deduplication.
-21. Implement circularity arbitration against ancestors.
-22. Implement persistent uncertainties.
-
-### Priority 7: Prepare the Frontend Boundary
-
-23. Add a backend control surface for:
-    - create run
-    - resume run
-    - pause or stop run
-    - list runs
-    - inspect node tree
-    - read audit and dossier artifacts
-
-24. Keep the CLI as a first-class client of the same storage-backed backend.
-
-## Recommended Next Implementation Chunk
-
-If work resumes immediately, the best next chunk is:
-
-1. source appendix/provenance rendering
-2. real branch synthesis
-3. duplicate child-summary suppression
-4. executive conclusion plus canonical findings
-5. negative-result budget and proxy-analysis pivot
-
-That sequence addresses the current failure mode from deep runs: the worker can
-find many related gaps, but the dossier does not yet compress them into a clear
-argument.

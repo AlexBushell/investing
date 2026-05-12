@@ -181,6 +181,30 @@ class RenderTests(unittest.TestCase):
         self.assertIn("brief (https://evil.example)", audit)
         self.assertIn("&lt;img src=x onerror=alert(1)&gt;", audit)
 
+    def test_dossier_suppresses_recursive_fallback_branch_synthesis(self):
+        run = start_run(self.conn, company="Example Co", model=FakeModelClient())
+        root = db.root_nodes(self.conn, run.run_id)[0]
+        db.store_branch_synthesis(
+            self.conn,
+            node_id=root.node_id,
+            branch_synthesis=(
+                "Child investigation capture:\n\n"
+                "- Child topic: Child investigation capture: - Grandchild topic: "
+                "Important takeaway."
+            ),
+        )
+        db.store_deep_dive_output(
+            self.conn,
+            node_id=root.node_id,
+            analysis="Concrete analysis paragraph.",
+            abstract="Abstract.",
+        )
+
+        dossier = render_dossier_markdown(self.conn, run.run_id)
+
+        self.assertNotIn("Child investigation capture:", dossier)
+        self.assertIn("Concrete analysis paragraph.", dossier)
+
 
 if __name__ == "__main__":
     unittest.main()

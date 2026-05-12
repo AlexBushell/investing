@@ -8,6 +8,7 @@ the worker can make explicit decisions from typed data.
 from __future__ import annotations
 
 from enum import Enum
+from typing import ClassVar
 from typing import Literal
 
 from pydantic import (
@@ -169,6 +170,21 @@ class DeepDiveOutput(StrictBaseModel):
     contradictions: list[Contradiction] = Field(default_factory=list)
     discovered_threads: list[ThreadCandidate] = Field(default_factory=list)
 
+    _EVIDENCE_GAP_BOILERPLATE_PHRASES: ClassVar[tuple[str, ...]] = (
+        "no material evidence gaps were identified",
+        "no evidence gaps were identified",
+    )
+    _CONCLUSION_GAP_SIGNAL_PHRASES: ClassVar[tuple[str, ...]] = (
+        "fail to provide",
+        "fails to provide",
+        "do not disclose",
+        "does not disclose",
+        "did not disclose",
+        "lack of",
+        "absence of",
+        "insufficient",
+    )
+
     @field_validator(
         "core_question",
         "source_assessment",
@@ -186,6 +202,33 @@ class DeepDiveOutput(StrictBaseModel):
                     "deep-dive fields must not include completion sentinels"
                 )
         return value
+
+    @field_validator("evidence_gaps")
+    @classmethod
+    def reject_evidence_gap_boilerplate(cls, gaps: list[str]) -> list[str]:
+        for gap in gaps:
+            normalized_gap = gap.strip().lower()
+            if any(
+                phrase in normalized_gap
+                for phrase in cls._EVIDENCE_GAP_BOILERPLATE_PHRASES
+            ):
+                raise ValueError(
+                    "evidence_gaps must use an empty list instead of boilerplate no-gap text"
+                )
+        return gaps
+
+    @model_validator(mode="after")
+    def require_gap_entries_when_conclusion_describes_missing_evidence(self):
+        normalized_conclusion = self.conclusion.lower()
+        mentions_missing_evidence = any(
+            phrase in normalized_conclusion
+            for phrase in self._CONCLUSION_GAP_SIGNAL_PHRASES
+        )
+        if mentions_missing_evidence and not self.evidence_gaps:
+            raise ValueError(
+                "evidence_gaps must be non-empty when conclusion describes missing or undisclosed evidence"
+            )
+        return self
 
     @computed_field
     @property

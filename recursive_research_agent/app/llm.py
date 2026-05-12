@@ -1509,25 +1509,27 @@ def _branch_synthesis_fallback(context: BranchSynthesisContext) -> str:
     for child in context.child_summaries:
         if child.failed:
             continue
-        summary = _first_sentence(child.summary)
+        summary = _summary_sentence_for_parent(child.summary)
         if not summary:
             continue
         completed_points.append(f"{child.topic}: {summary}")
 
-    lines = ["Child investigation capture:", ""]
+    sentences: list[str] = []
     if completed_points:
-        lines.extend(f"- {point}" for point in completed_points)
+        sentences.append(
+            "Completed child investigations indicate "
+            f"{'; '.join(completed_points)}."
+        )
     else:
-        lines.append("- No completed child summaries were available.")
+        sentences.append("No completed child summaries were available.")
 
     if failed_topics:
-        lines.append("")
-        lines.append(
-            "Unresolved child runs:"
+        sentences.append(
+            "Unresolved child runs: "
+            f"{', '.join(failed_topics)}."
         )
-        lines.extend(f"- {topic}" for topic in failed_topics)
 
-    return "\n".join(lines)
+    return " ".join(sentences)
 
 
 def _first_sentence(text: str) -> str:
@@ -1536,6 +1538,16 @@ def _first_sentence(text: str) -> str:
         return ""
     match = re.search(r"(.+?[.!?])(?:\s|$)", cleaned)
     return match.group(1) if match else cleaned
+
+
+def _summary_sentence_for_parent(text: str) -> str:
+    cleaned = " ".join(text.split()).strip()
+    if not cleaned:
+        return ""
+    while cleaned.lower().startswith("child investigation capture:"):
+        cleaned = cleaned.split(":", 1)[1].strip()
+    cleaned = re.sub(r"^[-*]\s*", "", cleaned)
+    return _first_sentence(cleaned)
 
 
 def _join_human_list(items: list[str]) -> str:

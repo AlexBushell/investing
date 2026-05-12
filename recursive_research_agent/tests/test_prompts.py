@@ -2,6 +2,7 @@ import unittest
 
 from app.prompts import (
     compact_deep_dive_retry_prompt,
+    DEDUP_SYSTEM_PROMPT,
     DEEP_DIVE_SYSTEM_PROMPT,
     deep_dive_prompt,
     REFLECT_SYSTEM_PROMPT,
@@ -46,6 +47,22 @@ class PromptTests(unittest.TestCase):
         self.assertIn("Example source-grounded claim", DEEP_DIVE_SYSTEM_PROMPT)
         self.assertIn("Example unsupported inference", DEEP_DIVE_SYSTEM_PROMPT)
         self.assertIn("Example evidence-gap language", DEEP_DIVE_SYSTEM_PROMPT)
+        self.assertIn("You may make analytical observations", DEEP_DIVE_SYSTEM_PROMPT)
+        self.assertIn("`evidence_gaps` may be an empty list", DEEP_DIVE_SYSTEM_PROMPT)
+
+    def test_deep_dive_prompt_allows_empty_evidence_gaps_and_requires_them_for_missing_facts(
+        self,
+    ):
+        prompt = deep_dive_prompt(
+            company="Example Co",
+            topic="Revenue quality",
+            investigation_brief="Investigate revenue quality.",
+        )
+
+        self.assertIn("0 to 6 complete-sentence gaps", prompt)
+        self.assertIn("An empty list", prompt)
+        self.assertIn("is valid when the supplied evidence genuinely resolves the thread", prompt)
+        self.assertIn("do not disclose", prompt)
 
     def test_search_plan_prompt_discourages_copying_brief_sentences(self):
         prompt = search_plan_prompt(
@@ -60,12 +77,23 @@ class PromptTests(unittest.TestCase):
     def test_reflect_system_prompt_includes_child_thread_examples(self):
         self.assertIn("Example child thread to spawn", REFLECT_SYSTEM_PROMPT)
         self.assertIn("Example child thread not to spawn", REFLECT_SYSTEM_PROMPT)
+        self.assertIn("smallest set you can justify", REFLECT_SYSTEM_PROMPT)
+        self.assertIn("do not spawn a child", REFLECT_SYSTEM_PROMPT)
+        self.assertIn("Classify it as `unresolved_unanswerable`", REFLECT_SYSTEM_PROMPT)
 
     def test_reflect_prompt_discourages_child_for_every_gap(self):
         prompt = reflect_prompt("Analysis text.")
 
         self.assertIn("Do not create a child for every missing source", prompt)
         self.assertIn("Deep-dive analysis", prompt)
+
+    def test_dedup_system_prompt_prefers_merging_same_evidence_hunt(self):
+        self.assertIn("optimize for avoiding duplicate work", DEDUP_SYSTEM_PROMPT)
+        self.assertIn("same primary source", DEDUP_SYSTEM_PROMPT)
+        self.assertIn(
+            "the candidate is a narrower sub-question of an existing thread",
+            DEDUP_SYSTEM_PROMPT,
+        )
 
     def test_compact_deep_dive_retry_prompt_is_shorter_and_mentions_validation(self):
         prompt = compact_deep_dive_retry_prompt(

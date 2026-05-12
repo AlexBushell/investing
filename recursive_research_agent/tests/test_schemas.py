@@ -122,6 +122,36 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual([], output.discovered_threads)
         self.assertIn("## Evidence Gaps", output.analysis)
 
+    def test_deep_dive_output_rejects_boilerplate_evidence_gap_entry(self):
+        with self.assertRaises(ValidationError):
+            DeepDiveOutput.model_validate(
+                {
+                    "core_question": "Assess Example Co revenue durability.",
+                    "source_assessment": "The supplied source is an annual report excerpt.",
+                    "key_findings": ["Source 1 states revenue increased."],
+                    "evidence_gaps": [
+                        "No material evidence gaps were identified in the supplied context."
+                    ],
+                    "conclusion": "The supplied source supports growth but not durability.",
+                    "abstract": "One paragraph abstract.",
+                }
+            )
+
+    def test_deep_dive_output_requires_gap_entries_when_conclusion_describes_missing_disclosure(
+        self,
+    ):
+        with self.assertRaises(ValidationError):
+            DeepDiveOutput.model_validate(
+                {
+                    "core_question": "Assess Example Co customer concentration.",
+                    "source_assessment": "The supplied source is an annual report excerpt.",
+                    "key_findings": ["Source 1 states revenue increased."],
+                    "evidence_gaps": [],
+                    "conclusion": "The supplied sources do not disclose top-customer concentration.",
+                    "abstract": "One paragraph abstract.",
+                }
+            )
+
     def test_deep_dive_output_rejects_legacy_analysis_blob(self):
         with self.assertRaises(ValidationError):
             DeepDiveOutput.model_validate(
