@@ -1,0 +1,768 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Infrastructure Investment Returns</title>
+  <style>
+    :root {
+      --bg: #0f1418;
+      --panel: #182127;
+      --panel-2: #1d2830;
+      --panel-3: #223039;
+      --text: #e8eef2;
+      --muted: #9eabb5;
+      --line: #2d3a44;
+      --line-2: #374651;
+      --accent: #54b38a;
+      --gain: #61d394;
+      --loss: #ff8b7b;
+      --shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top right, rgba(84, 179, 138, 0.08), transparent 22%),
+        linear-gradient(180deg, #11181d 0%, var(--bg) 100%);
+      color: var(--text);
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    .page {
+      width: min(1500px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 24px 0 48px;
+    }
+
+    .hero {
+      margin-bottom: 18px;
+    }
+
+    .hero-card,
+    .report-shell {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero-main {
+      padding: 18px 20px 16px;
+      background:
+        linear-gradient(180deg, rgba(84, 179, 138, 0.08), transparent 65%),
+        var(--panel);
+    }
+
+    .eyebrow,
+    .table-header strong,
+    .section-header strong {
+      display: block;
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow {
+      margin-bottom: 8px;
+      color: var(--accent);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(1.65rem, 2.2vw, 2.3rem);
+      line-height: 1.08;
+      letter-spacing: -0.03em;
+      font-weight: 700;
+    }
+
+    .report-shell {
+      overflow: hidden;
+    }
+
+    .report-section + .report-section {
+      border-top: 1px solid var(--line);
+    }
+
+    .section-header,
+    .table-header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 22px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-2);
+    }
+
+    .table-title {
+      margin: 0;
+      font-size: 1.2rem;
+      font-weight: 650;
+      letter-spacing: -0.02em;
+    }
+
+    .table-subtitle {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 0.94rem;
+      line-height: 1.5;
+    }
+
+    .table-header-meta {
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.02);
+      text-align: right;
+      min-width: 220px;
+    }
+
+    .table-header-meta span {
+      color: var(--text);
+      font-size: 0.95rem;
+    }
+
+    .summary-wrap,
+    .table-wrap,
+    .detail-table-wrap {
+      overflow-x: auto;
+    }
+
+    .summary-wrap {
+      padding: 0 8px;
+    }
+
+    .table-wrap {
+      padding: 0 8px 8px;
+    }
+
+    .summary-table,
+    .main-table,
+    .position-summary-table,
+    .detail-table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      table-layout: fixed;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .summary-table {
+      min-width: 820px;
+    }
+
+    .main-table {
+      min-width: 1200px;
+    }
+
+    .position-summary-table {
+      min-width: 1080px;
+    }
+
+    .detail-table {
+      min-width: 960px;
+    }
+
+    .summary-table th,
+    .summary-table td,
+    .main-table th,
+    .main-table td,
+    .position-summary-table th,
+    .position-summary-table td,
+    .detail-table th,
+    .detail-table td {
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      background: var(--panel);
+      text-align: right;
+      vertical-align: middle;
+      font-size: 0.92rem;
+    }
+
+    .summary-table thead th,
+    .position-summary-table thead th,
+    .detail-table thead th {
+      color: var(--muted);
+      background: var(--panel-2);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .summary-table tbody td {
+      font-size: 1.05rem;
+      font-weight: 600;
+    }
+
+    .summary-table tbody td.return-cash,
+    .summary-table tbody td.return-pct {
+      color: var(--gain);
+    }
+
+    .main-table col.symbol-col {
+      width: 120px;
+    }
+
+    .main-table col.return-col {
+      width: 145px;
+    }
+
+    .main-table col.pct-col {
+      width: 110px;
+    }
+
+    .main-table thead th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      padding: 0;
+      background: var(--panel-3);
+    }
+
+    .sort-button {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 13px 12px;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+
+    .sort-button:hover {
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text);
+    }
+
+    .sort-button:focus-visible {
+      outline: 2px solid rgba(84, 179, 138, 0.45);
+      outline-offset: -2px;
+    }
+
+    .sort-button.active {
+      color: var(--accent);
+    }
+
+    .sort-button.active .sort-indicator {
+      color: var(--accent);
+    }
+
+    .sort-label {
+      text-align: left;
+    }
+
+    .sort-indicator {
+      min-width: 1.4em;
+      text-align: right;
+      color: #77848f;
+    }
+
+    .main-table th:first-child,
+    .main-table td:first-child {
+      position: sticky;
+      left: 0;
+      z-index: 1;
+      text-align: left;
+      background: #192228;
+    }
+
+    .main-table thead th:first-child {
+      z-index: 3;
+      background: #223039;
+    }
+
+    .main-table tbody tr:nth-child(even) td {
+      background: #1b252b;
+    }
+
+    .main-table tbody tr:nth-child(even) td:first-child {
+      background: #1d282f;
+    }
+
+    .summary-row {
+      cursor: pointer;
+    }
+
+    .summary-row:hover td,
+    .summary-row.is-open td {
+      background: #223039;
+    }
+
+    .summary-row:hover td:first-child,
+    .summary-row.is-open td:first-child {
+      background: #263641;
+    }
+
+    .symbol-wrap,
+    .position-summary-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .symbol {
+      font-size: 0.9rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .expand-indicator {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 1px solid var(--line-2);
+      color: var(--muted);
+      font-size: 0.72rem;
+      flex: 0 0 auto;
+    }
+
+    .detail-row td {
+      padding: 0;
+      background: #12191e;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .detail-panel {
+      padding: 12px 14px 14px;
+    }
+
+    .position-summary-row {
+      cursor: pointer;
+    }
+
+    .position-summary-row td:first-child,
+    .position-summary-table th:first-child,
+    .detail-table th:first-child,
+    .detail-table td:first-child {
+      text-align: left;
+    }
+
+    .position-summary-row:hover td,
+    .position-summary-row.is-open td {
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .position-summary-label .expand-indicator {
+      width: 16px;
+      height: 16px;
+      font-size: 0.66rem;
+    }
+
+    .detail-table {
+      margin-top: 12px;
+    }
+
+    .detail-type {
+      font-weight: 700;
+      text-transform: capitalize;
+    }
+
+    .price-cell {
+      color: var(--muted);
+      white-space: normal;
+    }
+
+    .return-cell {
+      font-weight: 700;
+    }
+
+    .gain {
+      color: var(--gain);
+    }
+
+    .loss {
+      color: var(--loss);
+    }
+
+    .empty {
+      padding: 34px 18px;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    @media (max-width: 980px) {
+      .page {
+        width: min(100vw - 20px, 1500px);
+        padding-top: 14px;
+      }
+
+      .table-header,
+      .section-header {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .table-header-meta {
+        min-width: 0;
+        text-align: left;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="hero">
+      <div class="hero-card hero-main">
+        <span class="eyebrow">Local Live Report</span>
+        <h1>Infrastructure Returns</h1>
+      </div>
+    </section>
+
+    <section class="report-shell">
+      <div class="report-section">
+        <div class="section-header">
+          <div>
+            <strong>Summary</strong>
+            <h2 class="table-title">Portfolio Summary</h2>
+          </div>
+        </div>
+        <div class="summary-wrap">
+          <table class="summary-table">
+            <thead>
+              <tr>
+                <th>Purchase Cost</th>
+                <th>Sale Proceeds</th>
+                <th>Dividends</th>
+                <th>Current Value</th>
+                <th>Cash Return</th>
+                <th>Return %</th>
+              </tr>
+            </thead>
+            <tbody id="summaryBody">
+              <tr>
+                <td colspan="6" class="empty">Loading summary...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="report-section">
+        <div class="table-header">
+          <div>
+            <strong>Holdings</strong>
+            <h2 class="table-title">Per-Investment Summary</h2>
+            <p class="table-subtitle">Returns first, then click through into position summary and transactions.</p>
+          </div>
+          <div class="table-header-meta">
+            <strong>Source</strong>
+            <span>Live from local CSV + Yahoo</span>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="main-table">
+            <colgroup>
+              <col class="symbol-col">
+              <col class="return-col">
+              <col class="pct-col">
+              <col class="return-col">
+              <col class="pct-col">
+              <col class="return-col">
+              <col class="pct-col">
+            </colgroup>
+            <thead>
+              <tr>
+                <th><button class="sort-button" type="button" data-sort-key="symbol"><span class="sort-label">Symbol</span><span class="sort-indicator"></span></button></th>
+                <th><button class="sort-button" type="button" data-sort-key="dividendReturn"><span class="sort-label">Dividend Return</span><span class="sort-indicator"></span></button></th>
+                <th><button class="sort-button" type="button" data-sort-key="dividendReturnPct"><span class="sort-label">Dividend %</span><span class="sort-indicator"></span></button></th>
+                <th><button class="sort-button" type="button" data-sort-key="sharePriceReturn"><span class="sort-label">Share Price Return</span><span class="sort-indicator"></span></button></th>
+                <th><button class="sort-button" type="button" data-sort-key="sharePriceReturnPct"><span class="sort-label">Share Price %</span><span class="sort-indicator"></span></button></th>
+                <th><button class="sort-button" type="button" data-sort-key="totalReturn"><span class="sort-label">Total Return</span><span class="sort-indicator"></span></button></th>
+                <th><button class="sort-button" type="button" data-sort-key="totalReturnPct"><span class="sort-label">Total Return %</span><span class="sort-indicator"></span></button></th>
+              </tr>
+            </thead>
+            <tbody id="resultsBody">
+              <tr>
+                <td colspan="7" class="empty">Loading data...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const state = {
+      rows: [],
+      sortKey: "totalReturn",
+      sortDirection: "desc",
+      expandedSymbol: null,
+      expandedSummarySymbol: null,
+    };
+
+    const currencyFormatter = new Intl.NumberFormat("en-GB", {
+      style: "currency",
+      currency: "GBP",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
+    const numberFormatter = new Intl.NumberFormat("en-GB", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 3,
+    });
+
+    const priceFormatter = new Intl.NumberFormat("en-GB", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 4,
+    });
+
+    async function loadReport() {
+      try {
+        const response = await fetch("./api/report");
+        if (!response.ok) {
+          throw new Error("The local report endpoint is not available.");
+        }
+
+        const payload = await response.json();
+        if (payload.error) {
+          throw new Error(payload.error);
+        }
+
+        renderSummary(payload.summary);
+        state.rows = payload.rows || [];
+        updateSortButtons();
+        renderTable();
+      } catch (error) {
+        document.getElementById("summaryBody").innerHTML = `<tr><td colspan="6" class="empty">Summary unavailable</td></tr>`;
+        document.getElementById("resultsBody").innerHTML = `<tr><td colspan="7" class="empty">${escapeHtml(error.message)}</td></tr>`;
+      }
+    }
+
+    function renderSummary(summary) {
+      const body = document.getElementById("summaryBody");
+      const returnClass = summary.totalReturn >= 0 ? "gain" : "loss";
+      body.innerHTML = `
+        <tr>
+          <td>${currencyFormatter.format(summary.invested)}</td>
+          <td>${currencyFormatter.format(summary.proceeds)}</td>
+          <td>${currencyFormatter.format(summary.dividends)}</td>
+          <td>${currencyFormatter.format(summary.currentValue)}</td>
+          <td class="return-cash ${returnClass}">${currencyFormatter.format(summary.totalReturn)}</td>
+          <td class="return-pct ${returnClass}">${formatPercent(summary.totalReturnPct)}</td>
+        </tr>
+      `;
+    }
+
+    function renderTable() {
+      const body = document.getElementById("resultsBody");
+      const rows = getSortedRows(state.rows, state.sortKey, state.sortDirection);
+      if (!rows.length) {
+        body.innerHTML = `<tr><td colspan="7" class="empty">No holdings were found.</td></tr>`;
+        return;
+      }
+
+      body.innerHTML = rows.map(row => {
+        const dividendReturnClass = row.dividendReturn >= 0 ? "gain" : "loss";
+        const sharePriceReturnClass = row.sharePriceReturn >= 0 ? "gain" : "loss";
+        const totalReturnClass = row.totalReturn >= 0 ? "gain" : "loss";
+        const isOpen = state.expandedSymbol === row.symbol;
+        const detailRow = isOpen ? renderDetailRow(row) : "";
+
+        return `
+          <tr class="summary-row${isOpen ? " is-open" : ""}" data-symbol="${escapeHtml(row.symbol)}">
+            <td><span class="symbol-wrap"><span class="expand-indicator">${isOpen ? "-" : "+"}</span><span class="symbol">${escapeHtml(row.symbol)}</span></span></td>
+            <td class="return-cell ${dividendReturnClass}">${currencyFormatter.format(row.dividendReturn)}</td>
+            <td class="return-cell ${dividendReturnClass}">${formatPercent(row.dividendReturnPct)}</td>
+            <td class="return-cell ${sharePriceReturnClass}">${currencyFormatter.format(row.sharePriceReturn)}</td>
+            <td class="return-cell ${sharePriceReturnClass}">${formatPercent(row.sharePriceReturnPct)}</td>
+            <td class="return-cell ${totalReturnClass}">${currencyFormatter.format(row.totalReturn)}</td>
+            <td class="return-cell ${totalReturnClass}">${formatPercent(row.totalReturnPct)}</td>
+          </tr>${detailRow}
+        `;
+      }).join("");
+
+      body.querySelectorAll(".summary-row").forEach(row => {
+        row.addEventListener("click", handleRowToggle);
+      });
+
+      body.querySelectorAll(".position-summary-row").forEach(row => {
+        row.addEventListener("click", handleSummaryToggle);
+      });
+    }
+
+    function renderDetailRow(row) {
+      const isTransactionsOpen = state.expandedSummarySymbol === row.symbol;
+      const priceText = row.latestPriceDate
+        ? `${priceFormatter.format(row.latestPrice)} on ${escapeHtml(row.latestPriceDate)}`
+        : "Unavailable";
+      const transactionsSection = isTransactionsOpen ? renderTransactionsTable(row) : "";
+
+      return `
+        <tr class="detail-row">
+          <td colspan="7">
+            <div class="detail-panel">
+              <div class="detail-table-wrap">
+                <table class="position-summary-table">
+                  <thead>
+                    <tr>
+                      <th>Shares Bought</th>
+                      <th>Shares Sold</th>
+                      <th>Net Shares</th>
+                      <th>Latest Price</th>
+                      <th>Purchase Cost</th>
+                      <th>Sale Proceeds</th>
+                      <th>Dividends</th>
+                      <th>Current Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr class="position-summary-row${isTransactionsOpen ? " is-open" : ""}" data-symbol="${escapeHtml(row.symbol)}">
+                      <td><span class="symbol-wrap"><span class="expand-indicator">${isTransactionsOpen ? "-" : "+"}</span><span>${numberFormatter.format(row.sharesBought)}</span></span></td>
+                      <td>${numberFormatter.format(row.sharesSold)}</td>
+                      <td>${numberFormatter.format(row.netShares)}</td>
+                      <td class="price-cell">${priceText}</td>
+                      <td>${currencyFormatter.format(row.purchaseCost)}</td>
+                      <td>${currencyFormatter.format(row.saleProceeds)}</td>
+                      <td>${currencyFormatter.format(row.dividends)}</td>
+                      <td>${currencyFormatter.format(row.currentValue)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              ${transactionsSection}
+            </div>
+          </td>
+        </tr>
+      `;
+    }
+
+    function renderTransactionsTable(row) {
+      const transactions = row.transactions || [];
+      const details = transactions.length
+        ? transactions.map(transaction => `
+            <tr>
+              <td class="detail-type">${escapeHtml(transaction.type)}</td>
+              <td>${escapeHtml(transaction.date || "")}</td>
+              <td>${escapeHtml(transaction.settlementDate || "")}</td>
+              <td>${transaction.quantity ? numberFormatter.format(transaction.quantity) : "—"}</td>
+              <td>${transaction.price ? currencyFormatter.format(transaction.price) : "—"}</td>
+              <td>${transaction.debit ? currencyFormatter.format(transaction.debit) : "—"}</td>
+              <td>${transaction.credit ? currencyFormatter.format(transaction.credit) : "—"}</td>
+            </tr>
+          `).join("")
+        : `<tr><td colspan="7" class="empty">No transaction details available.</td></tr>`;
+
+      return `
+        <div class="detail-table-wrap">
+          <table class="detail-table">
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Date</th>
+                <th>Settlement</th>
+                <th>Quantity</th>
+                <th>Price</th>
+                <th>Debit</th>
+                <th>Credit</th>
+                
+              </tr>
+            </thead>
+            <tbody>${details}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function getSortedRows(rows, sortKey, sortDirection) {
+      const direction = sortDirection === "asc" ? 1 : -1;
+      return [...rows].sort((left, right) => {
+        const leftValue = left[sortKey];
+        const rightValue = right[sortKey];
+
+        if (sortKey === "symbol") {
+          return leftValue.localeCompare(rightValue) * direction;
+        }
+
+        return ((Number(leftValue) || 0) - (Number(rightValue) || 0)) * direction;
+      });
+    }
+
+    function updateSortButtons() {
+      document.querySelectorAll(".sort-button").forEach(button => {
+        const indicator = button.querySelector(".sort-indicator");
+        const isActive = button.dataset.sortKey === state.sortKey;
+        button.classList.toggle("active", isActive);
+        indicator.textContent = isActive
+          ? (state.sortDirection === "asc" ? "^" : "v")
+          : "<>";
+      });
+    }
+
+    function handleSortClick(event) {
+      const button = event.currentTarget;
+      const sortKey = button.dataset.sortKey;
+
+      if (state.sortKey === sortKey) {
+        state.sortDirection = state.sortDirection === "asc" ? "desc" : "asc";
+      } else {
+        state.sortKey = sortKey;
+        state.sortDirection = sortKey === "symbol" ? "asc" : "desc";
+      }
+
+      updateSortButtons();
+      renderTable();
+    }
+
+    function handleRowToggle(event) {
+      const symbol = event.currentTarget.dataset.symbol;
+      const previousSymbol = state.expandedSymbol;
+      const isClosing = state.expandedSymbol === symbol;
+      state.expandedSymbol = isClosing ? null : symbol;
+      state.expandedSummarySymbol = isClosing || previousSymbol !== symbol ? null : state.expandedSummarySymbol;
+      renderTable();
+    }
+
+    function handleSummaryToggle(event) {
+      event.stopPropagation();
+      const symbol = event.currentTarget.dataset.symbol;
+      state.expandedSummarySymbol = state.expandedSummarySymbol === symbol ? null : symbol;
+      renderTable();
+    }
+
+    function formatPercent(value) {
+      return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    document.querySelectorAll(".sort-button").forEach(button => {
+      button.addEventListener("click", handleSortClick);
+    });
+
+    updateSortButtons();
+    loadReport();
+  </script>
+</body>
+</html>
+
