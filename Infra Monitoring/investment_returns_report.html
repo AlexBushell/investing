@@ -130,6 +130,13 @@
       font-size: 0.95rem;
     }
 
+    .table-header-meta small {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+
     .summary-wrap,
     .table-wrap,
     .detail-table-wrap {
@@ -210,6 +217,10 @@
 
     .main-table col.symbol-col {
       width: 120px;
+    }
+
+    .main-table col.toggle-col {
+      width: 110px;
     }
 
     .main-table col.return-col {
@@ -300,6 +311,14 @@
       cursor: pointer;
     }
 
+    .summary-row.is-excluded td {
+      color: #7f8a93;
+    }
+
+    .summary-row.is-excluded td:first-child {
+      color: #a4afb8;
+    }
+
     .summary-row:hover td,
     .summary-row.is-open td {
       background: #223039;
@@ -335,6 +354,28 @@
       color: var(--muted);
       font-size: 0.72rem;
       flex: 0 0 auto;
+    }
+
+    .exclude-button {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--line-2);
+      border-radius: 9px;
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text);
+      font: inherit;
+      font-size: 0.82rem;
+      cursor: pointer;
+    }
+
+    .exclude-button:hover {
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .exclude-button.is-excluded {
+      color: var(--loss);
+      border-color: rgba(255, 139, 123, 0.28);
+      background: rgba(255, 139, 123, 0.08);
     }
 
     .detail-row td {
@@ -468,6 +509,7 @@
           <div class="table-header-meta">
             <strong>Source</strong>
             <span>Live from local CSV + Yahoo</span>
+            <small id="filterSummary">All investments included</small>
           </div>
         </div>
 
@@ -481,6 +523,7 @@
               <col class="pct-col">
               <col class="return-col">
               <col class="pct-col">
+              <col class="toggle-col">
             </colgroup>
             <thead>
               <tr>
@@ -491,11 +534,12 @@
                 <th><button class="sort-button" type="button" data-sort-key="sharePriceReturnPct"><span class="sort-label">Share Price %</span><span class="sort-indicator"></span></button></th>
                 <th><button class="sort-button" type="button" data-sort-key="totalReturn"><span class="sort-label">Total Return</span><span class="sort-indicator"></span></button></th>
                 <th><button class="sort-button" type="button" data-sort-key="totalReturnPct"><span class="sort-label">Total Return %</span><span class="sort-indicator"></span></button></th>
+                <th>Included</th>
               </tr>
             </thead>
             <tbody id="resultsBody">
               <tr>
-                <td colspan="7" class="empty">Loading data...</td>
+                <td colspan="8" class="empty">Loading data...</td>
               </tr>
             </tbody>
           </table>
@@ -511,6 +555,7 @@
       sortDirection: "desc",
       expandedSymbol: null,
       expandedSummarySymbol: null,
+      excludedSymbols: new Set(),
     };
 
     const currencyFormatter = new Intl.NumberFormat("en-GB", {
@@ -542,13 +587,14 @@
           throw new Error(payload.error);
         }
 
-        renderSummary(payload.summary);
         state.rows = payload.rows || [];
+        renderSummary(computeSummary(getIncludedRows()));
+        renderFilterSummary();
         updateSortButtons();
         renderTable();
       } catch (error) {
         document.getElementById("summaryBody").innerHTML = `<tr><td colspan="6" class="empty">Summary unavailable</td></tr>`;
-        document.getElementById("resultsBody").innerHTML = `<tr><td colspan="7" class="empty">${escapeHtml(error.message)}</td></tr>`;
+        document.getElementById("resultsBody").innerHTML = `<tr><td colspan="8" class="empty">${escapeHtml(error.message)}</td></tr>`;
       }
     }
 
@@ -567,11 +613,34 @@
       `;
     }
 
+    function computeSummary(rows) {
+      const invested = rows.reduce((sum, row) => sum + (Number(row.purchaseCost) || 0), 0);
+      const proceeds = rows.reduce((sum, row) => sum + (Number(row.saleProceeds) || 0), 0);
+      const dividends = rows.reduce((sum, row) => sum + (Number(row.dividends) || 0), 0);
+      const currentValue = rows.reduce((sum, row) => sum + (Number(row.currentValue) || 0), 0);
+      const totalReturn = rows.reduce((sum, row) => sum + (Number(row.totalReturn) || 0), 0);
+      const totalReturnPct = invested ? (totalReturn / invested) * 100 : 0;
+
+      return { invested, proceeds, dividends, currentValue, totalReturn, totalReturnPct };
+    }
+
+    function getIncludedRows() {
+      return state.rows.filter(row => !state.excludedSymbols.has(row.symbol));
+    }
+
+    function renderFilterSummary() {
+      const element = document.getElementById("filterSummary");
+      const excluded = [...state.excludedSymbols].sort();
+      element.textContent = excluded.length
+        ? `Excluded: ${excluded.join(", ")}`
+        : "All investments included";
+    }
+
     function renderTable() {
       const body = document.getElementById("resultsBody");
       const rows = getSortedRows(state.rows, state.sortKey, state.sortDirection);
       if (!rows.length) {
-        body.innerHTML = `<tr><td colspan="7" class="empty">No holdings were found.</td></tr>`;
+        body.innerHTML = `<tr><td colspan="8" class="empty">No holdings were found.</td></tr>`;
         return;
       }
 
@@ -580,10 +649,11 @@
         const sharePriceReturnClass = row.sharePriceReturn >= 0 ? "gain" : "loss";
         const totalReturnClass = row.totalReturn >= 0 ? "gain" : "loss";
         const isOpen = state.expandedSymbol === row.symbol;
+        const isExcluded = state.excludedSymbols.has(row.symbol);
         const detailRow = isOpen ? renderDetailRow(row) : "";
 
         return `
-          <tr class="summary-row${isOpen ? " is-open" : ""}" data-symbol="${escapeHtml(row.symbol)}">
+          <tr class="summary-row${isOpen ? " is-open" : ""}${isExcluded ? " is-excluded" : ""}" data-symbol="${escapeHtml(row.symbol)}">
             <td><span class="symbol-wrap"><span class="expand-indicator">${isOpen ? "-" : "+"}</span><span class="symbol">${escapeHtml(row.symbol)}</span></span></td>
             <td class="return-cell ${dividendReturnClass}">${currencyFormatter.format(row.dividendReturn)}</td>
             <td class="return-cell ${dividendReturnClass}">${formatPercent(row.dividendReturnPct)}</td>
@@ -591,6 +661,7 @@
             <td class="return-cell ${sharePriceReturnClass}">${formatPercent(row.sharePriceReturnPct)}</td>
             <td class="return-cell ${totalReturnClass}">${currencyFormatter.format(row.totalReturn)}</td>
             <td class="return-cell ${totalReturnClass}">${formatPercent(row.totalReturnPct)}</td>
+            <td><button class="exclude-button${isExcluded ? " is-excluded" : ""}" type="button" data-symbol="${escapeHtml(row.symbol)}">${isExcluded ? "Excluded" : "Included"}</button></td>
           </tr>${detailRow}
         `;
       }).join("");
@@ -601,6 +672,10 @@
 
       body.querySelectorAll(".position-summary-row").forEach(row => {
         row.addEventListener("click", handleSummaryToggle);
+      });
+
+      body.querySelectorAll(".exclude-button").forEach(button => {
+        button.addEventListener("click", handleExcludeToggle);
       });
     }
 
@@ -613,7 +688,7 @@
 
       return `
         <tr class="detail-row">
-          <td colspan="7">
+          <td colspan="8">
             <div class="detail-panel">
               <div class="detail-table-wrap">
                 <table class="position-summary-table">
@@ -740,6 +815,21 @@
       event.stopPropagation();
       const symbol = event.currentTarget.dataset.symbol;
       state.expandedSummarySymbol = state.expandedSummarySymbol === symbol ? null : symbol;
+      renderTable();
+    }
+
+    function handleExcludeToggle(event) {
+      event.stopPropagation();
+      const symbol = event.currentTarget.dataset.symbol;
+
+      if (state.excludedSymbols.has(symbol)) {
+        state.excludedSymbols.delete(symbol);
+      } else {
+        state.excludedSymbols.add(symbol);
+      }
+
+      renderSummary(computeSummary(getIncludedRows()));
+      renderFilterSummary();
       renderTable();
     }
 
