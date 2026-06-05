@@ -292,7 +292,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     host = "127.0.0.1"
-    port = 9000
+    port = 6000
     server = ThreadingHTTPServer((host, port), ReportHandler)
     LOGGER.info("Serving report at http://%s:%s/investment_returns_report.html", host, port)
     server.serve_forever()
