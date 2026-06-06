@@ -257,6 +257,8 @@ def build_report(rows: list[dict[str, str]], prices: dict[str, PriceInfo]) -> di
 
 
 class ReportHandler(SimpleHTTPRequestHandler):
+    REPORT_PAGE = "/investment_returns_report.html"
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(BASE_DIR), **kwargs)
 
@@ -265,7 +267,23 @@ class ReportHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/report":
             self.serve_report()
             return
-        super().do_GET()
+        if parsed.path == self.REPORT_PAGE:
+            self.path = parsed.path
+            super().do_GET()
+            return
+        self.send_error(404, "Not found")
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        if parsed.path == self.REPORT_PAGE:
+            self.path = parsed.path
+            super().do_HEAD()
+            return
+        self.send_error(404, "Not found")
+
+    def list_directory(self, path: str):  # type: ignore[override]
+        self.send_error(403, "Directory listing is disabled")
+        return None
 
     def serve_report(self) -> None:
         try:
@@ -292,7 +310,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     host = "127.0.0.1"
-    port = 6000
+    port = 10120
     server = ThreadingHTTPServer((host, port), ReportHandler)
     LOGGER.info("Serving report at http://%s:%s/investment_returns_report.html", host, port)
     server.serve_forever()
