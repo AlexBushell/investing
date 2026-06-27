@@ -182,6 +182,9 @@ class Scenario(BaseModel):
         if self.business_model_type != "cloud_software_ai_infrastructure":
             if self.market.current_share_price <= 0:
                 raise ValueError("current_share_price must be positive")
+            bmi = self.business_model_inputs
+            if "starting_revenue_bn" in bmi and bmi["starting_revenue_bn"] <= 0:
+                raise ValueError("starting_revenue_bn must be positive")
             return self
 
         if self.base_financials is None:

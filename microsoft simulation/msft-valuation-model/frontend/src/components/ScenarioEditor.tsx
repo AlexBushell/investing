@@ -419,18 +419,22 @@ export function ScenarioEditor({
               distribution={genericInputs.working_capital_pct_revenue_change}
               onNumberChange={onNumberChange}
             />
-            <DistributionFieldSet
-              title="Downturn Probability"
-              basePath="business_model_inputs.housing_downturn_shock.probability"
-              distribution={genericInputs.housing_downturn_shock.probability}
-              onNumberChange={onNumberChange}
-            />
-            <DistributionFieldSet
-              title="Downturn ASP Decline"
-              basePath="business_model_inputs.housing_downturn_shock.asp_decline"
-              distribution={genericInputs.housing_downturn_shock.asp_decline}
-              onNumberChange={onNumberChange}
-            />
+            {genericInputs.housing_downturn_shock && (
+              <>
+                <DistributionFieldSet
+                  title="Downturn Probability"
+                  basePath="business_model_inputs.housing_downturn_shock.probability"
+                  distribution={genericInputs.housing_downturn_shock.probability}
+                  onNumberChange={onNumberChange}
+                />
+                <DistributionFieldSet
+                  title="Downturn ASP Decline"
+                  basePath="business_model_inputs.housing_downturn_shock.asp_decline"
+                  distribution={genericInputs.housing_downturn_shock.asp_decline}
+                  onNumberChange={onNumberChange}
+                />
+              </>
+            )}
           </div>
         </section>
       ) : null}
@@ -524,18 +528,22 @@ export function ScenarioEditor({
               distribution={genericInputs.lease_liability_per_site_bn}
               onNumberChange={onNumberChange}
             />
-            <DistributionFieldSet
-              title="Consumer Squeeze Probability"
-              basePath="business_model_inputs.consumer_squeeze_shock.probability"
-              distribution={genericInputs.consumer_squeeze_shock.probability}
-              onNumberChange={onNumberChange}
-            />
-            <DistributionFieldSet
-              title="Squeeze Margin Haircut"
-              basePath="business_model_inputs.consumer_squeeze_shock.margin_haircut"
-              distribution={genericInputs.consumer_squeeze_shock.margin_haircut}
-              onNumberChange={onNumberChange}
-            />
+            {genericInputs.consumer_squeeze_shock && (
+              <>
+                <DistributionFieldSet
+                  title="Consumer Squeeze Probability"
+                  basePath="business_model_inputs.consumer_squeeze_shock.probability"
+                  distribution={genericInputs.consumer_squeeze_shock.probability}
+                  onNumberChange={onNumberChange}
+                />
+                <DistributionFieldSet
+                  title="Squeeze Margin Haircut"
+                  basePath="business_model_inputs.consumer_squeeze_shock.margin_haircut"
+                  distribution={genericInputs.consumer_squeeze_shock.margin_haircut}
+                  onNumberChange={onNumberChange}
+                />
+              </>
+            )}
           </div>
         </section>
       ) : null}

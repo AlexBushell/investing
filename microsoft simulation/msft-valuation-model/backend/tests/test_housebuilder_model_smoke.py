@@ -29,8 +29,9 @@ def test_housebuilder_scenario_runs() -> None:
     assert result["summary"]["target_return_85_confidence_price"] > 0
     assert result["summary"]["median_year_10_fcf_per_share"] > 0
     assert result["summary"]["median_maintenance_capex_to_revenue"] > 0
-    assert result["diagnostics"]["regime_frequency_balanced"] > 0
-    assert result["diagnostics"]["regime_frequency_disappointment"] > 0
+    regime_freqs = {item["key"]: item["frequency"] for item in result["diagnostics"]["regime_frequencies"]}
+    assert regime_freqs["steady_cycle"] > 0
+    assert regime_freqs["housing_downturn"] > 0
     assert {item["key"] for item in result["regime_metadata"]} == {
         "recovery",
         "steady_cycle",

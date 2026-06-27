@@ -100,10 +100,6 @@ export type SimulationDiagnostics = {
   median_growth_capex_to_revenue: number;
   shock_frequency_realised: number;
   accelerated_depreciation_frequency_realised: number;
-  regime_frequency_scarcity: number;
-  regime_frequency_balanced: number;
-  regime_frequency_overbuild: number;
-  regime_frequency_disappointment: number;
   regime_frequencies: RegimeMetadata[];
 };
 

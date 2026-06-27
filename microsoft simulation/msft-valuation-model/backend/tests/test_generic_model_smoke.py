@@ -26,7 +26,8 @@ def test_generic_revenue_margin_fcf_scenario_runs() -> None:
     assert len(result["confidence_price_curve"]["points"]) == 48
     assert np.isfinite(result["summary"]["median_cagr"])
     assert result["summary"]["target_return_85_confidence_price"] > 0
-    assert result["diagnostics"]["regime_frequency_balanced"] == 1.0
+    regime_freqs = {item["key"]: item["frequency"] for item in result["diagnostics"]["regime_frequencies"]}
+    assert regime_freqs["balanced"] == 1.0
     assert result["diagnostics"]["shock_frequency_realised"] == 0.0
 
 

@@ -41,13 +41,6 @@ def test_default_scenario_runs_without_nan() -> None:
         "disappointment",
     }
     assert any(item["label"] == "AI scarcity / high ROI" for item in result["regime_metadata"])
-    regime_total = (
-        result["diagnostics"]["regime_frequency_scarcity"]
-        + result["diagnostics"]["regime_frequency_balanced"]
-        + result["diagnostics"]["regime_frequency_overbuild"]
-        + result["diagnostics"]["regime_frequency_disappointment"]
-    )
-    assert abs(regime_total - 1.0) < 1e-9
     assert abs(sum(item["frequency"] for item in result["diagnostics"]["regime_frequencies"]) - 1.0) < 1e-9
 
 

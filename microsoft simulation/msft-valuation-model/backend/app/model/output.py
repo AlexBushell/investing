@@ -88,9 +88,12 @@ def _summary(simulation_arrays: SimulationArrays, scenario: Scenario) -> dict[st
 
 def _confidence_price_curve(simulation_arrays: SimulationArrays, scenario: Scenario) -> dict[str, Any]:
     confidence_percentile = (1.0 - TARGET_RETURN_CONFIDENCE_LEVEL) * 100.0
-    ending_value_confidence_floor = stable_percentile(
-        simulation_arrays.ending_value_per_share,
-        confidence_percentile,
+    ending_value_confidence_floor = max(
+        0.01,
+        stable_percentile(
+            simulation_arrays.ending_value_per_share,
+            confidence_percentile,
+        ),
     )
     target_return_discount_factor = (1.0 + scenario.simulation.target_cagr) ** scenario.simulation.horizon_years
     target_return_price = ending_value_confidence_floor / target_return_discount_factor
@@ -203,10 +206,6 @@ def _diagnostics(
         "accelerated_depreciation_frequency_realised": float(
             np.mean(simulation_arrays.accelerated_depreciation_occurs)
         ),
-        "regime_frequency_scarcity": float(np.mean(simulation_arrays.regime_code == 0)),
-        "regime_frequency_balanced": float(np.mean(simulation_arrays.regime_code == 1)),
-        "regime_frequency_overbuild": float(np.mean(simulation_arrays.regime_code == 2)),
-        "regime_frequency_disappointment": float(np.mean(simulation_arrays.regime_code == 3)),
         "regime_frequencies": _regime_frequencies(simulation_arrays, regime_definitions),
     }
     return diagnostics

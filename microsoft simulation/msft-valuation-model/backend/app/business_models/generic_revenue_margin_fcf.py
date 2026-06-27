@@ -126,7 +126,7 @@ class GenericRevenueMarginFcfModel:
             growth_investment[:, year_index] = growth_capex + working_capital_investment
             total_capex[:, year_index] = maintenance_investment[:, year_index] + growth_investment[:, year_index]
             depreciation[:, year_index] = maintenance_investment[:, year_index]
-            fcf[:, year_index] = net_income[:, year_index] - total_capex[:, year_index]
+            fcf[:, year_index] = net_income[:, year_index] + depreciation[:, year_index] - total_capex[:, year_index]
 
             rolling_pe = current_normalized_pe + (terminal_pe - current_normalized_pe) * (year_number / horizon)
             estimated_share_price = np.maximum(safe_divide(net_income[:, year_index], prior_share_count), 0.01) * rolling_pe
