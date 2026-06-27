@@ -40,6 +40,11 @@ const summaryCards = (
   { label: "Current Share Price", value: formatMoney(currentSharePrice) },
   { label: "Median 10Y CAGR", value: formatPercent(summary.median_cagr), tone: "accent" },
   { label: "P(Beat Target)", value: formatPercent(summary.probability_above_target), tone: "accent" },
+  {
+    label: "85% Target Return Price",
+    value: formatMoney(summary.target_return_85_confidence_price),
+    tone: "confidence",
+  },
   { label: "P(Negative Return)", value: formatPercent(summary.probability_of_loss) },
   { label: "P50 Terminal Price", value: formatMoney(summary.p50_terminal_share_price) },
   { label: "Valuation Zone", value: valuationZone(summary.probability_above_target) },

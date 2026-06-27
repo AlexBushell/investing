@@ -6,6 +6,7 @@
     "as_of_date": "2026-06-27",
     "description": "Default rough-prior scenario for probabilistic 10-year MSFT valuation with AI capex cycle."
   },
+  "business_model_type": "cloud_software_ai_infrastructure",
   "market": {
     "current_share_price": 372.97,
     "current_market_cap_bn": 2776.8,

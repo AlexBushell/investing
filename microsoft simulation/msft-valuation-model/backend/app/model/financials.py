@@ -6,6 +6,12 @@ import numpy as np
 
 from app.model.assumptions import Scenario
 from app.model.distributions import clamp, interpolate_linear, safe_divide, sample_distribution
+from app.valuation.capital_returns import apply_capital_returns_for_year, sample_capital_return_policy
+from app.valuation.terminal_value import (
+    sample_terminal_multiples,
+    total_return_cagr,
+    weighted_pe_fcf_terminal_share_price,
+)
 
 
 AI_LINE_KEYWORDS = ("AI Apps", "Azure AI")
@@ -77,20 +83,16 @@ def simulate_financials(
     )
     opex_path = interpolate_linear(scenario.opex.rd_and_sga_pct_of_revenue.start, opex_terminal, horizon)
 
-    dividend_payout = clamp(
-        sample_distribution(scenario.capital_return.dividend_payout_ratio, simulation_count, rng), 0.0, 0.8
+    capital_return_policy = sample_capital_return_policy(
+        scenario,
+        simulation_count,
+        rng,
+        dividend_payout_cap=0.8,
+        max_share_reduction_cap=0.05,
     )
-    buyback_share = clamp(
-        sample_distribution(scenario.capital_return.buyback_pct_of_post_dividend_fcf, simulation_count, rng), 0.0, 1.0
-    )
-    buyback_premium = sample_distribution(
-        scenario.capital_return.buyback_price_premium_to_intrinsic, simulation_count, rng
-    )
-
-    terminal_pe = clamp(sample_distribution(scenario.valuation.terminal_pe, simulation_count, rng), 1.0, None)
-    terminal_fcf_multiple = clamp(
-        sample_distribution(scenario.valuation.terminal_fcf_multiple, simulation_count, rng), 1.0, None
-    )
+    terminal_multiples = sample_terminal_multiples(scenario, simulation_count, rng, minimum=1.0)
+    terminal_pe = terminal_multiples.terminal_pe
+    terminal_fcf_multiple = terminal_multiples.terminal_fcf_multiple
 
     if scenario.shock.enable_price_crash:
         shock_probability = clamp(
@@ -151,9 +153,6 @@ def simulate_financials(
 
     current_normalized_pe = scenario.market.current_share_price / max(
         scenario.market.current_normalized_eps_ttm, 0.01
-    )
-    max_share_reduction = clamp(
-        sample_distribution(scenario.capital_return.max_annual_share_reduction, simulation_count, rng), 0.0, 0.05
     )
     share_count = np.full((simulation_count, horizon), scenario.market.estimated_diluted_shares_bn, dtype=float)
     dividends_per_share = np.zeros((simulation_count, horizon), dtype=float)
@@ -435,15 +434,15 @@ def simulate_financials(
         rolling_pe = current_normalized_pe + (terminal_pe - current_normalized_pe) * (year_number / horizon)
         estimated_share_price = np.maximum(current_eps_base, 0.01) * rolling_pe
 
-        dividends_paid = np.maximum(net_income[:, year_index], 0.0) * dividend_payout
-        dividends_per_share[:, year_index] = safe_divide(dividends_paid, prior_share_count)
-
-        available_post_dividend_fcf = np.maximum(fcf[:, year_index] - dividends_paid, 0.0)
-        buyback_cash = available_post_dividend_fcf * buyback_share
-        buyback_price = np.maximum(estimated_share_price * (1.0 + buyback_premium), 1.0)
-        shares_reduced = buyback_cash / buyback_price
-        shares_reduced = np.minimum(shares_reduced, prior_share_count * max_share_reduction)
-        next_share_count = np.maximum(prior_share_count - shares_reduced, prior_share_count * (1.0 - max_share_reduction))
+        capital_return = apply_capital_returns_for_year(
+            net_income=net_income[:, year_index],
+            free_cash_flow=fcf[:, year_index],
+            prior_share_count=prior_share_count,
+            estimated_share_price=estimated_share_price,
+            policy=capital_return_policy,
+        )
+        dividends_per_share[:, year_index] = capital_return.dividends_per_share
+        next_share_count = capital_return.ending_share_count
         share_count[:, year_index] = next_share_count
 
         eps[:, year_index] = safe_divide(net_income[:, year_index], next_share_count)
@@ -483,21 +482,20 @@ def simulate_financials(
     terminal_pe = np.clip(terminal_pe, 5.0, 40.0)
     terminal_fcf_multiple = np.clip(terminal_fcf_multiple, 5.0, 40.0)
 
-    year_10_eps = eps[:, -1]
-    year_10_fcf_per_share = safe_divide(fcf[:, -1], share_count[:, -1])
-    terminal_value_eps = year_10_eps * terminal_pe
-    terminal_value_fcf = year_10_fcf_per_share * terminal_fcf_multiple
-    terminal_share_price = (
-        scenario.valuation.valuation_weight_eps * terminal_value_eps
-        + scenario.valuation.valuation_weight_fcf * terminal_value_fcf
-        + scenario.valuation.net_cash_adjustment_bn / scenario.market.estimated_diluted_shares_bn
+    terminal_share_price = weighted_pe_fcf_terminal_share_price(
+        scenario=scenario,
+        terminal_eps=eps[:, -1],
+        terminal_fcf=fcf[:, -1],
+        terminal_share_count=share_count[:, -1],
+        terminal_pe=terminal_pe,
+        terminal_fcf_multiple=terminal_fcf_multiple,
     )
-    cumulative_dividends = dividends_per_share.sum(axis=1)
-    ending_value_per_share = terminal_share_price + cumulative_dividends
-
-    from app.model.distributions import geometric_cagr
-
-    cagr = geometric_cagr(ending_value_per_share, scenario.market.current_share_price, horizon)
+    ending_value_per_share, cagr = total_return_cagr(
+        terminal_share_price=terminal_share_price,
+        dividends_per_share=dividends_per_share,
+        current_share_price=scenario.market.current_share_price,
+        horizon_years=horizon,
+    )
 
     return SimulationArrays(
         revenue=total_revenue,

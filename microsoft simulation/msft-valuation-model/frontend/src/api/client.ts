@@ -2,6 +2,7 @@ import type {
   OutputConfig,
   RegimeFilter,
   Scenario,
+  ScenarioCatalogItem,
   SensitivityResponse,
   SimulationResponse,
 } from "../types";
@@ -27,6 +28,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function fetchDefaultScenario(): Promise<Scenario> {
   return request<Scenario>("/scenario/default");
+}
+
+export function fetchScenarios(): Promise<ScenarioCatalogItem[]> {
+  return request<ScenarioCatalogItem[]>("/scenarios");
+}
+
+export function fetchScenarioById(scenarioId: string): Promise<Scenario> {
+  return request<Scenario>(`/scenarios/${scenarioId}`);
 }
 
 export function simulateScenario(

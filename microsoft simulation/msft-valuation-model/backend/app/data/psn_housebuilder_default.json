@@ -1,0 +1,208 @@
+{
+  "meta": {
+    "ticker": "PSN.L",
+    "company": "Persimmon",
+    "currency": "GBP",
+    "as_of_date": "2026-06-27",
+    "description": "Default housebuilder scenario using completions, ASP, land reinvestment, book value, and housing downturn risk."
+  },
+  "business_model_type": "housebuilder",
+  "market": {
+    "current_share_price": 10.7,
+    "current_market_cap_bn": 3.424,
+    "current_reported_eps_ttm": 0.75,
+    "current_normalized_eps_ttm": 0.75,
+    "current_pe_ttm": 14.3,
+    "estimated_diluted_shares_bn": 0.32
+  },
+  "simulation": {
+    "horizon_years": 10,
+    "simulation_count": 20000,
+    "random_seed": 42,
+    "target_cagr": 0.12,
+    "tax_rate": {
+      "type": "pert",
+      "min": 0.24,
+      "mode": 0.25,
+      "max": 0.27
+    }
+  },
+  "capital_return": {
+    "dividend_payout_ratio": {
+      "type": "pert",
+      "min": 0.45,
+      "mode": 0.7,
+      "max": 0.9
+    },
+    "buyback_pct_of_post_dividend_fcf": {
+      "type": "pert",
+      "min": 0.0,
+      "mode": 0.05,
+      "max": 0.2
+    },
+    "buyback_price_premium_to_intrinsic": {
+      "type": "fixed",
+      "value": 0.0
+    },
+    "minimum_cash_buffer_bn": 0.1,
+    "max_annual_share_reduction": {
+      "type": "pert",
+      "min": 0.0,
+      "mode": 0.01,
+      "max": 0.03
+    }
+  },
+  "valuation": {
+    "terminal_pe": {
+      "type": "pert",
+      "min": 8.0,
+      "mode": 13.0,
+      "max": 18.0
+    },
+    "terminal_fcf_multiple": {
+      "type": "fixed",
+      "value": 10.0
+    },
+    "terminal_price_to_book": {
+      "type": "pert",
+      "min": 0.9,
+      "mode": 1.3,
+      "max": 1.8
+    },
+    "terminal_dividend_yield": {
+      "type": "pert",
+      "min": 0.035,
+      "mode": 0.05,
+      "max": 0.075
+    },
+    "valuation_weight_eps": 0.45,
+    "valuation_weight_fcf": 0.0,
+    "valuation_weight_price_to_book": 0.35,
+    "valuation_weight_dividend_yield": 0.2,
+    "net_cash_adjustment_bn": 0.0
+  },
+  "business_model_inputs": {
+    "starting_completions": 11905,
+    "starting_average_selling_price": 278000,
+    "starting_book_value_bn": 3.6,
+    "starting_net_debt_bn": -0.116,
+    "completions_growth": {
+      "years_1_to_3": {
+        "type": "pert",
+        "min": 0.015,
+        "mode": 0.07,
+        "max": 0.13
+      },
+      "years_4_to_7": {
+        "type": "pert",
+        "min": 0.0,
+        "mode": 0.045,
+        "max": 0.085
+      },
+      "years_8_to_10": {
+        "type": "pert",
+        "min": -0.02,
+        "mode": 0.02,
+        "max": 0.045
+      }
+    },
+    "asp_growth": {
+      "years_1_to_3": {
+        "type": "pert",
+        "min": 0.015,
+        "mode": 0.045,
+        "max": 0.08
+      },
+      "years_4_to_7": {
+        "type": "pert",
+        "min": 0.015,
+        "mode": 0.04,
+        "max": 0.065
+      },
+      "years_8_to_10": {
+        "type": "pert",
+        "min": 0.005,
+        "mode": 0.025,
+        "max": 0.045
+      }
+    },
+    "gross_margin": {
+      "start": 0.22,
+      "terminal": {
+        "type": "pert",
+        "min": 0.21,
+        "mode": 0.275,
+        "max": 0.33
+      }
+    },
+    "operating_cost_pct_revenue": {
+      "type": "pert",
+      "min": 0.055,
+      "mode": 0.07,
+      "max": 0.09
+    },
+    "land_reinvestment_pct_revenue": {
+      "type": "pert",
+      "min": 0.08,
+      "mode": 0.14,
+      "max": 0.22
+    },
+    "working_capital_pct_revenue_change": {
+      "type": "pert",
+      "min": 0.1,
+      "mode": 0.25,
+      "max": 0.45
+    },
+    "housing_downturn_shock": {
+      "enabled": true,
+      "probability": {
+        "type": "pert",
+        "min": 0.15,
+        "mode": 0.3,
+        "max": 0.5
+      },
+      "shock_year": {
+        "type": "pert_integer",
+        "min": 1,
+        "mode": 3,
+        "max": 6
+      },
+      "completions_decline": {
+        "type": "pert",
+        "min": 0.05,
+        "mode": 0.15,
+        "max": 0.3
+      },
+      "asp_decline": {
+        "type": "pert",
+        "min": 0.03,
+        "mode": 0.1,
+        "max": 0.2
+      },
+      "gross_margin_haircut": {
+        "type": "pert",
+        "min": 0.03,
+        "mode": 0.07,
+        "max": 0.12
+      },
+      "land_write_down_probability_given_shock": {
+        "type": "pert",
+        "min": 0.05,
+        "mode": 0.15,
+        "max": 0.35
+      },
+      "land_write_down_pct_book": {
+        "type": "pert",
+        "min": 0.02,
+        "mode": 0.06,
+        "max": 0.15
+      },
+      "terminal_pb_haircut": {
+        "type": "pert",
+        "min": 0.05,
+        "mode": 0.15,
+        "max": 0.3
+      }
+    }
+  }
+}

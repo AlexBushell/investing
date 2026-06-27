@@ -1,0 +1,124 @@
+{
+  "meta": {
+    "ticker": "GEN",
+    "company": "Generic Company",
+    "currency": "USD",
+    "as_of_date": "2026-06-27",
+    "description": "Default generic revenue, margin, and FCF probabilistic valuation scenario."
+  },
+  "business_model_type": "generic_revenue_margin_fcf",
+  "market": {
+    "current_share_price": 20.0,
+    "current_market_cap_bn": 2.0,
+    "current_reported_eps_ttm": 1.05,
+    "current_normalized_eps_ttm": 1.05,
+    "current_pe_ttm": 19.0,
+    "estimated_diluted_shares_bn": 0.1
+  },
+  "simulation": {
+    "horizon_years": 10,
+    "simulation_count": 20000,
+    "random_seed": 42,
+    "target_cagr": 0.12,
+    "tax_rate": {
+      "type": "pert",
+      "min": 0.19,
+      "mode": 0.23,
+      "max": 0.27
+    }
+  },
+  "capital_return": {
+    "dividend_payout_ratio": {
+      "type": "pert",
+      "min": 0.15,
+      "mode": 0.25,
+      "max": 0.4
+    },
+    "buyback_pct_of_post_dividend_fcf": {
+      "type": "pert",
+      "min": 0.0,
+      "mode": 0.2,
+      "max": 0.5
+    },
+    "buyback_price_premium_to_intrinsic": {
+      "type": "pert",
+      "min": 0.0,
+      "mode": 0.05,
+      "max": 0.15
+    },
+    "minimum_cash_buffer_bn": 0.1,
+    "max_annual_share_reduction": {
+      "type": "pert",
+      "min": 0.0,
+      "mode": 0.02,
+      "max": 0.05
+    }
+  },
+  "valuation": {
+    "terminal_pe": {
+      "type": "pert",
+      "min": 10.0,
+      "mode": 15.0,
+      "max": 22.0
+    },
+    "terminal_fcf_multiple": {
+      "type": "pert",
+      "min": 9.0,
+      "mode": 14.0,
+      "max": 20.0
+    },
+    "valuation_weight_eps": 0.6,
+    "valuation_weight_fcf": 0.4,
+    "net_cash_adjustment_bn": 0.0
+  },
+  "business_model_inputs": {
+    "starting_revenue_bn": 1.0,
+    "revenue_growth": {
+      "years_1_to_3": {
+        "type": "pert",
+        "min": 0.02,
+        "mode": 0.06,
+        "max": 0.1
+      },
+      "years_4_to_7": {
+        "type": "pert",
+        "min": 0.01,
+        "mode": 0.04,
+        "max": 0.08
+      },
+      "years_8_to_10": {
+        "type": "pert",
+        "min": 0.0,
+        "mode": 0.03,
+        "max": 0.06
+      }
+    },
+    "operating_margin": {
+      "start": 0.15,
+      "terminal": {
+        "type": "pert",
+        "min": 0.1,
+        "mode": 0.16,
+        "max": 0.22
+      }
+    },
+    "maintenance_investment_pct_revenue": {
+      "type": "pert",
+      "min": 0.02,
+      "mode": 0.04,
+      "max": 0.08
+    },
+    "growth_investment_pct_incremental_revenue": {
+      "type": "pert",
+      "min": 0.1,
+      "mode": 0.3,
+      "max": 0.6
+    },
+    "working_capital_pct_incremental_revenue": {
+      "type": "pert",
+      "min": 0.05,
+      "mode": 0.1,
+      "max": 0.2
+    }
+  }
+}

@@ -1,6 +1,13 @@
 import { type ChangeEvent, startTransition, useEffect, useMemo, useState } from "react";
 
-import { fetchDefaultScenario, runSensitivity, simulateScenario } from "./api/client";
+import {
+  fetchDefaultScenario,
+  fetchScenarioById,
+  fetchScenarios,
+  runSensitivity,
+  simulateScenario,
+} from "./api/client";
+import { ConfidencePriceCurve } from "./components/ConfidencePriceCurve";
 import { Layout } from "./components/Layout";
 import { OverviewDashboard } from "./components/OverviewDashboard";
 import { PercentileTable } from "./components/PercentileTable";
@@ -9,7 +16,14 @@ import { RegimeDiagnostics } from "./components/RegimeDiagnostics";
 import { ScenarioEditor } from "./components/ScenarioEditor";
 import { SensitivityChart } from "./components/SensitivityChart";
 import { defaultOutputConfig, useScenarioStore } from "./state/useScenarioStore";
-import type { RegimeFilter, Scenario, SensitivityResponse, SimulationResponse } from "./types";
+import type {
+  RegimeFilter,
+  Scenario,
+  ScenarioCatalogItem,
+  SensitivityResponse,
+  SimulationResponse,
+  RegimeMetadata,
+} from "./types";
 import "./styles.css";
 
 const sensitivityVariables = [
@@ -18,6 +32,36 @@ const sensitivityVariables = [
   "gpu_economic_life",
   "shock_probability",
   "capex_intensity",
+];
+
+const genericSensitivityVariables = [
+  "terminal_pe",
+  "terminal_fcf_multiple",
+  "generic_revenue_growth",
+  "generic_operating_margin",
+  "generic_reinvestment",
+];
+
+const housebuilderSensitivityVariables = [
+  "terminal_pe",
+  "terminal_price_to_book",
+  "terminal_dividend_yield",
+  "completions_growth",
+  "average_selling_price_growth",
+  "gross_margin",
+  "land_reinvestment_pct_revenue",
+  "housing_downturn_probability",
+];
+
+const lowCostGymSensitivityVariables = [
+  "terminal_pe",
+  "terminal_fcf_multiple",
+  "gym_new_sites",
+  "gym_revenue_per_site_growth",
+  "gym_cash_margin",
+  "gym_growth_capex",
+  "gym_lease_liability",
+  "gym_consumer_squeeze_probability",
 ];
 
 function clone<T>(value: T): T {
@@ -33,11 +77,37 @@ function formatRunCount(value: number): string {
   return new Intl.NumberFormat("en-US").format(value);
 }
 
-function formatRegimeFilter(value: RegimeFilter): string {
+function formatRegimeFilter(value: RegimeFilter, metadata: RegimeMetadata[] = []): string {
   if (value === "all") {
     return "All regimes";
   }
-  return value.charAt(0).toUpperCase() + value.slice(1);
+  return metadata.find((item) => item.key === value)?.label ?? value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function sensitivityVariablesForScenario(nextScenario: Scenario): string[] {
+  if (nextScenario.business_model_type === "generic_revenue_margin_fcf") {
+    return genericSensitivityVariables;
+  }
+  if (nextScenario.business_model_type === "housebuilder") {
+    return housebuilderSensitivityVariables;
+  }
+  if (nextScenario.business_model_type === "low_cost_gym_ifrs16") {
+    return lowCostGymSensitivityVariables;
+  }
+  return sensitivityVariables;
+}
+
+function scenarioDescription(nextScenario: Scenario | null): string {
+  if (nextScenario?.business_model_type === "generic_revenue_margin_fcf") {
+    return "Probability of clearing a target CAGR under revenue growth, margin, reinvestment, capital return, and terminal valuation uncertainty.";
+  }
+  if (nextScenario?.business_model_type === "housebuilder") {
+    return "Probability of clearing a target CAGR under completions, average selling price, land reinvestment, book value, dividends, and housing downturn uncertainty.";
+  }
+  if (nextScenario?.business_model_type === "low_cost_gym_ifrs16") {
+    return "Probability of clearing a target CAGR under site rollout, revenue per gym, maintenance capex, growth capex, IFRS16 lease burden, and trade-down tailwinds.";
+  }
+  return "Probability of clearing a target CAGR under AI growth, capex strain, margin pressure, and terminal valuation uncertainty.";
 }
 
 function setByPath(target: Record<string, any>, path: string, value: unknown): Record<string, any> {
@@ -75,11 +145,20 @@ export default function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [lastRunSeed, setLastRunSeed] = useState<number | null>(null);
   const [regimeFilter, setRegimeFilter] = useState<RegimeFilter>("all");
+  const [scenarioCatalog, setScenarioCatalog] = useState<ScenarioCatalogItem[]>([]);
+  const [activeScenarioId, setActiveScenarioId] = useState("msft_cloud_ai_default");
 
   useEffect(() => {
     void (async () => {
       try {
-        const defaultScenario = await fetchDefaultScenario();
+        const catalog = await fetchScenarios();
+        const defaultScenarioId =
+          catalog.find((item) => item.scenario_id === "msft_cloud_ai_default")?.scenario_id ??
+          catalog[0]?.scenario_id ??
+          "msft_cloud_ai_default";
+        const defaultScenario = await fetchScenarioById(defaultScenarioId);
+        setScenarioCatalog(catalog);
+        setActiveScenarioId(defaultScenarioId);
         setInitialScenario(defaultScenario);
         setScenario(defaultScenario);
         await handleRun(defaultScenario, defaultOutputConfig, { reroll: false }, "all");
@@ -119,7 +198,7 @@ export default function App() {
     try {
       const [simulationResult, sensitivityResult] = await Promise.all([
         simulateScenario(nextScenario, nextOutput, runSeed, selectedRegimeFilter),
-        runSensitivity(nextScenario, sensitivityVariables, runSeed),
+        runSensitivity(nextScenario, sensitivityVariablesForScenario(nextScenario), runSeed),
       ]);
 
       startTransition(() => {
@@ -166,13 +245,19 @@ export default function App() {
 
   async function resetScenario() {
     try {
-      const defaultScenario = await fetchDefaultScenario();
-      setScenario(defaultScenario);
+      const nextScenario =
+        activeScenarioId === "custom"
+          ? await fetchDefaultScenario()
+          : await fetchScenarioById(activeScenarioId);
+      if (activeScenarioId === "custom") {
+        setActiveScenarioId("msft_cloud_ai_default");
+      }
+      setScenario(nextScenario);
       setOutputConfig(defaultOutputConfig);
       setRegimeFilter("all");
       setSimulation(null);
       setSensitivity(null);
-      await handleRun(defaultScenario, defaultOutputConfig, { reroll: false }, "all");
+      await handleRun(nextScenario, defaultOutputConfig, { reroll: false }, "all");
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Failed to reset scenario.");
     }
@@ -186,7 +271,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = "msft-scenario.json";
+    anchor.download = `${scenario.meta?.ticker ?? "valuation"}-scenario.json`;
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -199,6 +284,7 @@ export default function App() {
     void file.text().then(async (text) => {
       const nextScenario = JSON.parse(text) as Scenario;
       setScenario(nextScenario);
+      setActiveScenarioId("custom");
       setRegimeFilter("all");
       setSimulation(null);
       setSensitivity(null);
@@ -207,6 +293,23 @@ export default function App() {
     }).catch(() => {
       setError("Could not parse uploaded scenario JSON.");
     });
+  }
+
+  async function handleScenarioSelection(scenarioId: string) {
+    try {
+      const nextScenario = await fetchScenarioById(scenarioId);
+      setActiveScenarioId(scenarioId);
+      setScenario(nextScenario);
+      setOutputConfig(defaultOutputConfig);
+      setRegimeFilter("all");
+      setSimulation(null);
+      setSensitivity(null);
+      setStatus(`Loaded ${nextScenario.meta?.company ?? scenarioId}. Running scenario...`);
+      await handleRun(nextScenario, defaultOutputConfig, { reroll: false }, "all");
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Failed to load scenario.");
+      setStatus("Scenario load failed.");
+    }
   }
 
   async function handleRegimeFilterChange(nextFilter: RegimeFilter) {
@@ -250,14 +353,30 @@ export default function App() {
     () => (
       <div className="hero-copy">
         <div>
-          <p className="eyebrow">Microsoft Probabilistic Valuation Cockpit</p>
-          <h1>MSFT valuation cockpit</h1>
-          <p className="hero-text">
-            Probability of clearing a target CAGR under AI growth, capex strain, margin pressure,
-            and terminal valuation uncertainty.
-          </p>
+          <p className="eyebrow">Probabilistic Stock Valuation Cockpit</p>
+          <h1>{scenario?.meta?.ticker ?? "Stock"} valuation cockpit</h1>
+          <p className="hero-text">{scenarioDescription(scenario)}</p>
         </div>
         <div className="hero-actions">
+          <label className="scenario-picker">
+            <span>Scenario</span>
+            <select
+              value={activeScenarioId}
+              onChange={(event) => void handleScenarioSelection(event.target.value)}
+              disabled={isRunning}
+            >
+              {activeScenarioId === "custom" ? (
+                <option value="custom" disabled>
+                  Custom uploaded scenario
+                </option>
+              ) : null}
+              {scenarioCatalog.map((item) => (
+                <option key={item.scenario_id} value={item.scenario_id}>
+                  {item.ticker} - {item.company}
+                </option>
+              ))}
+            </select>
+          </label>
           <button type="button" onClick={() => void handleRun()} disabled={!scenario || isRunning}>
             {isRunning ? "Running..." : "Run fresh draw"}
           </button>
@@ -277,7 +396,7 @@ export default function App() {
         {error ? <p className="error-banner">{error}</p> : null}
       </div>
     ),
-    [error, isRunning, lastRunSeed, outputConfig, regimeFilter, scenario, status],
+    [activeScenarioId, error, isRunning, lastRunSeed, outputConfig, regimeFilter, scenario, scenarioCatalog, status],
   );
 
   if (!scenario || !simulation) {
@@ -324,7 +443,7 @@ export default function App() {
               <span>Seed</span>
               <strong>{lastRunSeed === null ? "Unseeded" : lastRunSeed}</strong>
               <span>Regime lens</span>
-              <strong>{formatRegimeFilter(simulation.regime_filter)}</strong>
+              <strong>{formatRegimeFilter(simulation.regime_filter, simulation.regime_metadata)}</strong>
               <span>Simulations shown</span>
               <strong>
                 {formatRunCount(simulation.filtered_simulation_count)} /{" "}
@@ -334,6 +453,7 @@ export default function App() {
           </section>
           <RegimeDiagnostics
             diagnostics={simulation.diagnostics}
+            regimeMetadata={simulation.regime_metadata}
             activeFilter={regimeFilter}
             onFilterChange={(nextFilter) => void handleRegimeFilterChange(nextFilter)}
           />
@@ -345,6 +465,7 @@ export default function App() {
         summary={simulation.summary}
         currentSharePrice={scenario.market.current_share_price}
       />
+      <ConfidencePriceCurve curve={simulation.confidence_price_curve} />
       <ProbabilityHistogramWithConfidenceOverlay distribution={simulation.distribution} />
       <PercentileTable rows={simulation.percentiles} />
     </Layout>

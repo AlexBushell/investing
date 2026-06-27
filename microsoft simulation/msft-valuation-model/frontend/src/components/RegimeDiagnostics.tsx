@@ -1,7 +1,8 @@
-import type { RegimeFilter, SimulationDiagnostics } from "../types";
+import type { RegimeFilter, RegimeMetadata, SimulationDiagnostics } from "../types";
 
 type Props = {
   diagnostics: SimulationDiagnostics;
+  regimeMetadata: RegimeMetadata[];
   activeFilter: RegimeFilter;
   onFilterChange: (filter: RegimeFilter) => void;
 };
@@ -10,35 +11,8 @@ function formatPercent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
-const regimeItems = (diagnostics: SimulationDiagnostics) => [
-  {
-    key: "scarcity" as const,
-    label: "AI scarcity / high ROI",
-    value: diagnostics.regime_frequency_scarcity,
-    description: "Strong AI demand, better margins, and supportive terminal valuation.",
-  },
-  {
-    key: "balanced" as const,
-    label: "Balanced growth",
-    value: diagnostics.regime_frequency_balanced,
-    description: "More normal demand, capex, and valuation outcomes.",
-  },
-  {
-    key: "overbuild" as const,
-    label: "Overbuild / price compression",
-    value: diagnostics.regime_frequency_overbuild,
-    description: "High buildout, weaker utilization, and valuation pressure.",
-  },
-  {
-    key: "disappointment" as const,
-    label: "AI disappointment",
-    value: diagnostics.regime_frequency_disappointment,
-    description: "Slower AI monetization with weaker growth and margin support.",
-  },
-];
-
-export function RegimeDiagnostics({ diagnostics, activeFilter, onFilterChange }: Props) {
-  const items = regimeItems(diagnostics);
+export function RegimeDiagnostics({ diagnostics, regimeMetadata, activeFilter, onFilterChange }: Props) {
+  const items = regimeMetadata.length ? regimeMetadata : diagnostics.regime_frequencies;
 
   return (
     <section className="panel">
@@ -61,7 +35,7 @@ export function RegimeDiagnostics({ diagnostics, activeFilter, onFilterChange }:
           <button
             type="button"
             className={activeFilter === item.key ? "regime-filter active" : "regime-filter"}
-            disabled={item.value <= 0}
+            disabled={item.frequency <= 0}
             key={item.key}
             onClick={() => onFilterChange(item.key)}
           >
@@ -74,13 +48,13 @@ export function RegimeDiagnostics({ diagnostics, activeFilter, onFilterChange }:
           <button
             type="button"
             className={activeFilter === item.key ? "regime-card active" : "regime-card"}
-            disabled={item.value <= 0}
+            disabled={item.frequency <= 0}
             key={item.key}
             onClick={() => onFilterChange(item.key)}
           >
             <div className="regime-row">
               <strong>{item.label}</strong>
-              <span className="regime-value">{formatPercent(item.value)}</span>
+              <span className="regime-value">{formatPercent(item.frequency)}</span>
             </div>
             <p>{item.description}</p>
           </button>
@@ -88,7 +62,7 @@ export function RegimeDiagnostics({ diagnostics, activeFilter, onFilterChange }:
       </div>
       <div className="regime-meta">
         <span>Shock realised: {formatPercent(diagnostics.shock_frequency_realised)}</span>
-        <span>Accelerated depreciation: {formatPercent(diagnostics.accelerated_depreciation_frequency_realised)}</span>
+        <span>Secondary stress: {formatPercent(diagnostics.accelerated_depreciation_frequency_realised)}</span>
       </div>
     </section>
   );

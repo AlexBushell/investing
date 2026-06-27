@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
 from app.model.assumptions import Scenario, SimulationRequest, SensitivityRequest
+from app.model.scenarios import list_scenarios, load_scenario
 from app.model.sensitivity import run_sensitivity_analysis
 from app.model.simulation import load_default_scenario, run_simulation
 
@@ -10,6 +11,19 @@ router = APIRouter()
 @router.get("/scenario/default")
 def get_default_scenario() -> dict:
     return load_default_scenario()
+
+
+@router.get("/scenarios")
+def get_scenarios() -> list[dict]:
+    return list_scenarios()
+
+
+@router.get("/scenarios/{scenario_id}")
+def get_scenario(scenario_id: str) -> dict:
+    try:
+        return load_scenario(scenario_id)
+    except Exception as exc:  # pragma: no cover - surfaced through API
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/simulate")

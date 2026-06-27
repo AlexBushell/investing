@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 DistributionType = Literal["pert", "fixed", "pert_integer", "derived"]
-RegimeFilter = Literal["all", "scarcity", "balanced", "overbuild", "disappointment"]
+RegimeFilter = str
 
 
 class DistributionSpec(BaseModel):
@@ -102,15 +102,28 @@ class CapitalReturnSpec(BaseModel):
 class ValuationSpec(BaseModel):
     terminal_pe: DistributionSpec
     terminal_fcf_multiple: DistributionSpec
+    terminal_price_to_book: DistributionSpec | None = None
+    terminal_dividend_yield: DistributionSpec | None = None
     valuation_weight_eps: float
     valuation_weight_fcf: float
+    valuation_weight_price_to_book: float = 0.0
+    valuation_weight_dividend_yield: float = 0.0
     net_cash_adjustment_bn: float = 0.0
 
     @model_validator(mode="after")
     def validate_weights(self) -> "ValuationSpec":
-        total = self.valuation_weight_eps + self.valuation_weight_fcf
+        total = (
+            self.valuation_weight_eps
+            + self.valuation_weight_fcf
+            + self.valuation_weight_price_to_book
+            + self.valuation_weight_dividend_yield
+        )
         if abs(total - 1.0) > 1e-6:
             raise ValueError("valuation weights must sum to 1.0")
+        if self.valuation_weight_price_to_book > 0 and self.terminal_price_to_book is None:
+            raise ValueError("price-to-book valuation requires terminal_price_to_book")
+        if self.valuation_weight_dividend_yield > 0 and self.terminal_dividend_yield is None:
+            raise ValueError("dividend-yield valuation requires terminal_dividend_yield")
         return self
 
 
@@ -152,18 +165,27 @@ class MarketSpec(BaseModel):
 
 class Scenario(BaseModel):
     meta: dict[str, Any]
+    business_model_type: str = "cloud_software_ai_infrastructure"
     market: MarketSpec
-    base_financials: BaseFinancials
+    base_financials: BaseFinancials | None = None
     simulation: SimulationSpec
-    revenue_lines: list[RevenueLine]
-    opex: OpexSpec
-    capex: CapexSpec
-    shock: ShockSpec
+    revenue_lines: list[RevenueLine] = Field(default_factory=list)
+    opex: OpexSpec | None = None
+    capex: CapexSpec | None = None
+    shock: ShockSpec | None = None
     capital_return: CapitalReturnSpec
     valuation: ValuationSpec
+    business_model_inputs: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def sanity_check(self) -> "Scenario":
+        if self.business_model_type != "cloud_software_ai_infrastructure":
+            if self.market.current_share_price <= 0:
+                raise ValueError("current_share_price must be positive")
+            return self
+
+        if self.base_financials is None:
+            raise ValueError("cloud/software/AI model requires base_financials")
         total_revenue = sum(line.starting_revenue_bn for line in self.revenue_lines)
         base_revenue = self.base_financials.fy2025_revenue_bn
         if total_revenue <= 0:

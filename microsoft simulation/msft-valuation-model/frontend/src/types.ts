@@ -27,9 +27,24 @@ export type ProbabilityDistribution = {
   buckets: DistributionBucket[];
 };
 
+export type ConfidencePriceCurve = {
+  confidence_level: number;
+  target_cagr: number;
+  current_share_price: number;
+  target_return_price: number;
+  ending_value_confidence_floor: number;
+  points: Array<{
+    entry_price: number;
+    confidence_cagr: number;
+  }>;
+};
+
 export type SimulationSummary = {
   simulation_count: number;
   target_cagr: number;
+  target_return_confidence_level: number;
+  target_return_85_confidence_price: number;
+  target_return_85_confidence_price_vs_current: number;
   probability_above_target: number;
   probability_below_target: number;
   probability_of_loss: number;
@@ -89,14 +104,24 @@ export type SimulationDiagnostics = {
   regime_frequency_balanced: number;
   regime_frequency_overbuild: number;
   regime_frequency_disappointment: number;
+  regime_frequencies: RegimeMetadata[];
 };
 
-export type RegimeFilter = "all" | "scarcity" | "balanced" | "overbuild" | "disappointment";
+export type RegimeFilter = string;
+
+export type RegimeMetadata = {
+  key: string;
+  label: string;
+  description: string;
+  code: number;
+  frequency: number;
+};
 
 export type SimulationResponse = {
   summary: SimulationSummary;
   percentiles: PercentileRow[];
   distribution: ProbabilityDistribution;
+  confidence_price_curve: ConfidencePriceCurve;
   target_marker: {
     value: number;
     label: string;
@@ -105,6 +130,7 @@ export type SimulationResponse = {
   };
   fan_chart: Array<Record<string, number | string>>;
   diagnostics: SimulationDiagnostics;
+  regime_metadata: RegimeMetadata[];
   regime_filter: RegimeFilter;
   base_simulation_count: number;
   filtered_simulation_count: number;
@@ -112,6 +138,15 @@ export type SimulationResponse = {
 
 export type SensitivityResponse = {
   items: SensitivityItem[];
+};
+
+export type ScenarioCatalogItem = {
+  scenario_id: string;
+  company: string;
+  ticker: string;
+  currency: string;
+  business_model_type: string;
+  description: string;
 };
 
 export type HistogramConfig = {
