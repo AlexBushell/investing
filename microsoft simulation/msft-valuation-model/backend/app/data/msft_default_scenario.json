@@ -1,0 +1,294 @@
+{
+  "meta": {
+    "ticker": "MSFT",
+    "company": "Microsoft Corporation",
+    "currency": "USD",
+    "as_of_date": "2026-06-27",
+    "description": "Default rough-prior scenario for probabilistic 10-year MSFT valuation with AI capex cycle."
+  },
+  "market": {
+    "current_share_price": 372.97,
+    "current_market_cap_bn": 2776.8,
+    "current_reported_eps_ttm": 16.8,
+    "current_normalized_eps_ttm": 15.78,
+    "current_pe_ttm": 22.2,
+    "estimated_diluted_shares_bn": 7.44
+  },
+  "base_financials": {
+    "fy2025_revenue_bn": 281.7,
+    "fy2025_operating_income_bn": 128.5,
+    "fy2025_net_income_bn": 101.8,
+    "fy2025_eps": 13.64,
+    "fy2025_ppe_additions_bn": 64.6,
+    "fy2025_depreciation_bn": 22.0,
+    "fy2025_cloud_gross_margin_pct": 69.0,
+    "fy2026_q3_revenue_bn": 82.9,
+    "fy2026_q3_eps": 4.27,
+    "fy2026_q3_capex_bn": 31.9,
+    "fy2026_q3_cash_paid_for_ppe_bn": 30.9,
+    "fy2026_q3_fcf_bn": 15.8,
+    "fy2026_q3_cloud_revenue_bn": 54.5,
+    "fy2026_q3_cloud_gross_margin_pct": 66.0,
+    "fy2026_q3_ai_arr_bn": 37.0,
+    "calendar_2026_capex_guidance_bn": 190.0
+  },
+  "simulation": {
+    "horizon_years": 10,
+    "simulation_count": 20000,
+    "random_seed": 42,
+    "target_cagr": 0.12,
+    "tax_rate": {
+      "type": "pert",
+      "min": 0.17,
+      "mode": 0.19,
+      "max": 0.21
+    }
+  },
+  "revenue_lines": [
+    {
+      "name": "Core Productivity",
+      "starting_revenue_bn": 123.0,
+      "description": "Core Microsoft 365, Office, LinkedIn, Dynamics, security and related productivity stack excluding explicit AI uplift.",
+      "growth": {
+        "years_1_to_3": { "type": "pert", "min": 0.06, "mode": 0.09, "max": 0.13 },
+        "years_4_to_7": { "type": "pert", "min": 0.04, "mode": 0.07, "max": 0.10 },
+        "years_8_to_10": { "type": "pert", "min": 0.03, "mode": 0.05, "max": 0.08 }
+      },
+      "gross_margin": {
+        "start": 0.80,
+        "terminal": { "type": "pert", "min": 0.74, "mode": 0.78, "max": 0.82 }
+      },
+      "capex_intensity": {
+        "maintenance_pct_of_revenue": { "type": "pert", "min": 0.02, "mode": 0.03, "max": 0.05 },
+        "growth_pct_of_incremental_revenue": { "type": "pert", "min": 0.05, "mode": 0.08, "max": 0.12 }
+      }
+    },
+    {
+      "name": "AI Apps / Copilot",
+      "starting_revenue_bn": 12.0,
+      "description": "Copilot, GitHub Copilot, Security Copilot, Dynamics agents, LinkedIn agentic products and other first-party AI application revenue.",
+      "growth": {
+        "years_1_to_3": { "type": "pert", "min": 0.20, "mode": 0.40, "max": 0.80 },
+        "years_4_to_7": { "type": "pert", "min": 0.08, "mode": 0.18, "max": 0.35 },
+        "years_8_to_10": { "type": "pert", "min": 0.03, "mode": 0.10, "max": 0.20 }
+      },
+      "gross_margin": {
+        "start": 0.55,
+        "terminal": { "type": "pert", "min": 0.45, "mode": 0.60, "max": 0.72 }
+      },
+      "capex_intensity": {
+        "maintenance_pct_of_revenue": { "type": "pert", "min": 0.08, "mode": 0.15, "max": 0.30 },
+        "growth_pct_of_incremental_revenue": { "type": "pert", "min": 0.40, "mode": 0.80, "max": 1.40 }
+      }
+    },
+    {
+      "name": "Azure / Intelligent Cloud non-AI",
+      "starting_revenue_bn": 103.0,
+      "description": "Azure and broader Intelligent Cloud revenue excluding explicit AI infrastructure usage.",
+      "growth": {
+        "years_1_to_3": { "type": "pert", "min": 0.08, "mode": 0.13, "max": 0.20 },
+        "years_4_to_7": { "type": "pert", "min": 0.05, "mode": 0.09, "max": 0.15 },
+        "years_8_to_10": { "type": "pert", "min": 0.03, "mode": 0.06, "max": 0.10 }
+      },
+      "gross_margin": {
+        "start": 0.66,
+        "terminal": { "type": "pert", "min": 0.58, "mode": 0.64, "max": 0.70 }
+      },
+      "capex_intensity": {
+        "maintenance_pct_of_revenue": { "type": "pert", "min": 0.14, "mode": 0.20, "max": 0.28 },
+        "growth_pct_of_incremental_revenue": { "type": "pert", "min": 0.60, "mode": 0.90, "max": 1.25 }
+      }
+    },
+    {
+      "name": "Azure AI / infrastructure",
+      "starting_revenue_bn": 25.0,
+      "description": "AI infrastructure, training, inference, model hosting and AI usage-based cloud services.",
+      "growth": {
+        "years_1_to_3": { "type": "pert", "min": 0.25, "mode": 0.50, "max": 0.90 },
+        "years_4_to_7": { "type": "pert", "min": 0.05, "mode": 0.22, "max": 0.45 },
+        "years_8_to_10": { "type": "pert", "min": -0.02, "mode": 0.08, "max": 0.22 }
+      },
+      "gross_margin": {
+        "start": 0.45,
+        "terminal": { "type": "pert", "min": 0.25, "mode": 0.45, "max": 0.62 }
+      },
+      "capex_intensity": {
+        "maintenance_pct_of_revenue": { "type": "pert", "min": 0.20, "mode": 0.35, "max": 0.60 },
+        "growth_pct_of_incremental_revenue": { "type": "pert", "min": 1.00, "mode": 1.80, "max": 3.00 }
+      }
+    },
+    {
+      "name": "More Personal Computing",
+      "starting_revenue_bn": 55.0,
+      "description": "Windows OEM, devices, gaming, search advertising and consumer computing.",
+      "growth": {
+        "years_1_to_3": { "type": "pert", "min": -0.03, "mode": 0.02, "max": 0.07 },
+        "years_4_to_7": { "type": "pert", "min": -0.02, "mode": 0.02, "max": 0.06 },
+        "years_8_to_10": { "type": "pert", "min": -0.02, "mode": 0.01, "max": 0.05 }
+      },
+      "gross_margin": {
+        "start": 0.54,
+        "terminal": { "type": "pert", "min": 0.48, "mode": 0.54, "max": 0.60 }
+      },
+      "capex_intensity": {
+        "maintenance_pct_of_revenue": { "type": "pert", "min": 0.02, "mode": 0.04, "max": 0.08 },
+        "growth_pct_of_incremental_revenue": { "type": "pert", "min": 0.05, "mode": 0.10, "max": 0.20 }
+      }
+    }
+  ],
+  "opex": {
+    "rd_and_sga_pct_of_revenue": {
+      "start": 0.22,
+      "terminal": { "type": "pert", "min": 0.19, "mode": 0.21, "max": 0.24 }
+    },
+    "ai_extra_opex_pct_of_ai_revenue": {
+      "type": "pert",
+      "min": 0.03,
+      "mode": 0.06,
+      "max": 0.12
+    }
+  },
+  "capex": {
+    "short_lived_asset_share": {
+      "type": "pert",
+      "min": 0.55,
+      "mode": 0.67,
+      "max": 0.75
+    },
+    "long_lived_asset_share": {
+      "type": "derived",
+      "formula": "1 - short_lived_asset_share"
+    },
+    "gpu_economic_life_years": {
+      "type": "pert",
+      "min": 2.0,
+      "mode": 3.0,
+      "max": 4.5
+    },
+    "datacenter_economic_life_years": {
+      "type": "pert",
+      "min": 10.0,
+      "mode": 15.0,
+      "max": 20.0
+    },
+    "component_cost_change_per_year": {
+      "description": "Negative means cheaper future capacity; positive means continued component inflation.",
+      "type": "pert",
+      "min": -0.12,
+      "mode": -0.04,
+      "max": 0.05
+    },
+    "initial_capex_overlay_bn": {
+      "year_1": { "type": "pert", "min": 160.0, "mode": 190.0, "max": 220.0 },
+      "year_2": { "type": "pert", "min": 130.0, "mode": 170.0, "max": 220.0 },
+      "year_3": { "type": "pert", "min": 100.0, "mode": 140.0, "max": 200.0 }
+    }
+  },
+  "shock": {
+    "enable_price_crash": true,
+    "shock_probability": {
+      "type": "pert",
+      "min": 0.15,
+      "mode": 0.30,
+      "max": 0.50
+    },
+    "shock_year": {
+      "type": "pert_integer",
+      "min": 3,
+      "mode": 5,
+      "max": 7
+    },
+    "ai_price_decline": {
+      "type": "pert",
+      "min": 0.15,
+      "mode": 0.35,
+      "max": 0.60
+    },
+    "utilisation_decline": {
+      "type": "pert",
+      "min": 0.05,
+      "mode": 0.18,
+      "max": 0.35
+    },
+    "ai_growth_haircut_after_shock": {
+      "type": "pert",
+      "min": 0.20,
+      "mode": 0.40,
+      "max": 0.70
+    },
+    "ai_margin_haircut_after_shock": {
+      "type": "pert",
+      "min": 0.05,
+      "mode": 0.12,
+      "max": 0.25
+    },
+    "future_growth_capex_reduction_after_shock": {
+      "type": "pert",
+      "min": 0.15,
+      "mode": 0.35,
+      "max": 0.60
+    },
+    "accelerated_depreciation_probability_given_shock": {
+      "type": "pert",
+      "min": 0.10,
+      "mode": 0.25,
+      "max": 0.50
+    },
+    "accelerated_depreciation_pct_of_short_lived_asset_base": {
+      "type": "pert",
+      "min": 0.05,
+      "mode": 0.15,
+      "max": 0.35
+    },
+    "terminal_multiple_haircut_given_shock": {
+      "type": "pert",
+      "min": 0.05,
+      "mode": 0.15,
+      "max": 0.30
+    }
+  },
+  "capital_return": {
+    "dividend_payout_ratio": {
+      "type": "pert",
+      "min": 0.18,
+      "mode": 0.22,
+      "max": 0.28
+    },
+    "buyback_pct_of_post_dividend_fcf": {
+      "type": "pert",
+      "min": 0.20,
+      "mode": 0.45,
+      "max": 0.75
+    },
+    "buyback_price_premium_to_intrinsic": {
+      "type": "pert",
+      "min": -0.05,
+      "mode": 0.05,
+      "max": 0.20
+    },
+    "minimum_cash_buffer_bn": 80.0,
+    "max_annual_share_reduction": {
+      "type": "pert",
+      "min": 0.01,
+      "mode": 0.02,
+      "max": 0.03
+    }
+  },
+  "valuation": {
+    "terminal_pe": {
+      "type": "pert",
+      "min": 15.0,
+      "mode": 21.0,
+      "max": 28.0
+    },
+    "terminal_fcf_multiple": {
+      "type": "pert",
+      "min": 14.0,
+      "mode": 20.0,
+      "max": 27.0
+    },
+    "valuation_weight_eps": 0.60,
+    "valuation_weight_fcf": 0.40,
+    "net_cash_adjustment_bn": 0.0
+  }
+}
